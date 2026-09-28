@@ -1,0 +1,13 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/cmake_install.cmake",
+		"/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/flutter/cmake_install.cmake",
+		"/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/runner/cmake_install.cmake",
+		"/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/plugins/desktop_webview_window/cmake_install.cmake",
+		"/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/plugins/flutter_secure_storage_linux/cmake_install.cmake",
+		"/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/plugins/jni/cmake_install.cmake",
+		"/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/plugins/jni/shared/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

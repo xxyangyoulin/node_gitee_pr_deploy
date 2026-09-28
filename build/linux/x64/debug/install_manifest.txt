@@ -1,0 +1,16 @@
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/gitee_release_console
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/icudtl.dat
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/lib/libflutter_linux_gtk.so
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/lib/libdesktop_webview_window_plugin.so
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/lib/libflutter_secure_storage_linux_plugin.so
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/lib/libdartjni.so
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/lib/native_assets.json
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/flutter_assets/kernel_blob.bin
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/flutter_assets/fonts/MaterialIcons-Regular.otf
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/flutter_assets/shaders/ink_sparkle.frag
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/flutter_assets/shaders/stretch_effect.frag
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/flutter_assets/NativeAssetsManifest.json
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/flutter_assets/AssetManifest.bin
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/flutter_assets/FontManifest.json
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/flutter_assets/NOTICES.Z
+/home/yyl/Projects/gitee-release-console/build/linux/x64/debug/bundle/data/flutter_assets/version.json

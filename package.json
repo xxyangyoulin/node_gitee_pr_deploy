@@ -1,0 +1,31 @@
+{
+  "name": "gitee-release-console",
+  "version": "0.1.0",
+  "description": "Linux desktop console for Gitee pull requests and deployments",
+  "main": "dist-server/main.js",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build:server": "tsc -p server/tsconfig.json",
+    "check": "npm run build && npm run build:server",
+    "test:ui": "node tests/run-all.cjs",
+    "start:web": "npm run build && npm run build:server && node dist-server/main.js",
+    "start": "npm run start:web"
+  },
+  "dependencies": {
+    "highlight.js": "^11.12.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@vitejs/plugin-vue": "^5.2.3",
+    "electron": "^36.4.0",
+    "playwright-core": "^1.63.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vue-tsc": "^2.2.10"
+  }
+}

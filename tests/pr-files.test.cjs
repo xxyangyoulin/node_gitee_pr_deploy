@@ -1,0 +1,98 @@
+const { chromium } = require('playwright-core')
+const { findChromium, shot, BASE_URL } = require('./helpers.cjs')
+const PROJECTS = [{ id: 1, name: 'proj-one', repository: 'owner/proj-one', token: 't', openPrs: 1 }]
+const mk = (n, dir = 'src/module') => ({ filename: `${dir}/file${n}.ts`, patch: `+++ b/x\n@@ -1,3 +1,6 @@\n-a\n-b\n-c\n+new${n}-1\n+new${n}-2\n+new${n}-3\n+new${n}-4\n+new${n}-5\n+new${n}-6` })
+const FILES = [mk(1), mk(2), mk(3), mk(4, 'docs/guide'), mk(5), mk(6)]
+let failures = 0
+
+function check(name, cond) {
+  if (cond) console.log(`PASS ${name}`)
+  else { failures++; console.log(`FAIL ${name}`) }
+}
+
+;(async () => {
+  const browser = await chromium.launch({ executablePath: findChromium(), headless: true })
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+  page.on('pageerror', (e) => console.log('[pageerror]', e.message))
+
+  await page.route('**/api/**', (route) => {
+    const req = route.request()
+    const path = new URL(req.url()).pathname
+    if (path === '/api/projects') return route.fulfill({ json: PROJECTS })
+    if (path === '/api/gitee/pulls') return route.fulfill({ json: [{ number: 7, title: 'fake pr', head: { ref: 'dock' }, base: { ref: 'master' } }] })
+    if (path === '/api/gitee/pull-logs') return route.fulfill({ json: [] })
+    if (path === '/api/gitee/pull-files') return route.fulfill({ json: FILES })
+    if (path === '/api/gitee/file') return route.fulfill({ json: { content: Buffer.from('full file content line1\nline2').toString('base64') } })
+    return route.fulfill({ json: {} })
+  })
+
+  await page.goto(`${BASE_URL}/#/pulls`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(400)
+
+  // 先选中 PR 加载文件
+  await page.locator('.pr-item').first().click()
+  await page.waitForTimeout(400)
+
+  // 目录树侧栏
+  const names = async () => page.locator('.file-item .file-name').allTextContents()
+  check('目录排在文件前', (await names())[0] === 'docs' && (await names())[3] === 'src' && (await names())[4] === 'module')
+  check('树共 10 行', (await names()).length === 10)
+  check('目录聚合统计 src +30', (await page.locator('.file-item.dir', { hasText: 'src' }).locator('.stat-added').textContent()) === '+30')
+
+  const srcRow = page.locator('.file-item.dir', { hasText: 'src' })
+  await srcRow.click()
+  await page.waitForTimeout(150)
+  check('折叠 src 后 4 行', (await names()).length === 4)
+  await srcRow.click()
+  await page.waitForTimeout(150)
+  check('重新展开恢复 10 行', (await names()).length === 10)
+
+  await page.locator('.file-item', { hasText: 'file6.ts' }).last().click()
+  await page.waitForTimeout(500)
+  check('点击文件行高亮', (await page.locator('.file-item.active .file-name').textContent()) === 'file6.ts')
+
+  // 工具栏
+  check('工具栏显示 6 个文件', (await page.locator('.files-toolbar span').first().textContent()) === '6 个文件')
+  check('工具栏总统计 +36/-18', (await page.locator('.toolbar-stats').textContent()) === '+36-18')
+  check('每卡片有复制按钮', (await page.locator('.copy-btn:not(.full-toggle)').count()) === 6)
+  check('默认全展开 6 个 diff', (await page.locator('.file-diff').count()) === 6)
+
+  await page.locator('.files-toolbar button', { hasText: '全部收起' }).click()
+  check('全部收起生效', (await page.locator('.file-diff').count()) === 0)
+  await page.locator('.files-toolbar button', { hasText: '全部展开' }).click()
+  check('全部展开生效', (await page.locator('.file-diff').count()) === 6)
+
+  // 文件搜索
+  await page.locator('.file-search').fill('file4')
+  await page.waitForTimeout(100)
+  check('搜索过滤卡片', (await page.locator('.file-card:visible').count()) === 1)
+  check('搜索联动侧栏', JSON.stringify(await names()) === JSON.stringify(['docs', 'guide', 'file4.ts']))
+  await page.locator('.file-search').fill('')
+  await page.waitForTimeout(100)
+  check('清空恢复', (await page.locator('.file-card:visible').count()) === 6)
+
+  // 拖拽调宽
+  const asideWidthBefore = (await page.locator('.file-list').boundingBox()).width
+  const handle = await page.locator('.resize-handle').boundingBox()
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + 120, handle.y + 200, { steps: 5 })
+  await page.mouse.up()
+  await page.waitForTimeout(100)
+  const asideWidthAfter = (await page.locator('.file-list').boundingBox()).width
+  check(`拖拽调宽生效(${Math.round(asideWidthBefore)}→${Math.round(asideWidthAfter)})`, asideWidthAfter > asideWidthBefore + 80)
+
+  // 完整文件切换
+  await page.locator('.copy-btn.full-toggle').first().click()
+  await page.waitForTimeout(300)
+  check('完整文件按钮变为返回 diff', (await page.locator('.copy-btn.full-toggle').first().textContent()) === '返回 diff')
+  check('完整文件内容已加载', (await page.locator('.full-file').first().textContent()).includes('line2'))
+  await page.locator('.copy-btn.full-toggle').first().click()
+  await page.waitForTimeout(200)
+  check('切回 diff 视图', (await page.locator('.full-file').count()) === 0 && (await page.locator('.file-diff').count()) === 6)
+
+  await page.screenshot({ path: shot('pr-files.png') })
+  await browser.close()
+  console.log(failures ? `\n${failures} failed` : '\nALL PASS')
+  process.exit(failures ? 1 : 0)
+})().catch((e) => { console.error(e); process.exit(1) })

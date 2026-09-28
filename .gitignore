@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-server/
+dist-electron/
+release-console.sqlite
+.idea/
+tests/screenshots/
+*.log
