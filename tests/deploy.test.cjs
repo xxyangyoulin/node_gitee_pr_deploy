@@ -12,6 +12,7 @@ const configs = [
   { projectId: 1, projectName: 'proj-one', host: 'a.com', username: 'deploy', remotePath: '/srv/one', command: './deploy.sh' },
   { projectId: 2, projectName: 'proj-two', host: '', username: '', remotePath: '', command: '' },
 ]
+const deployLogs = [{ id: 1, projectId: 1, projectName: 'proj-one', host: 'deploy@a.com', output: '历史输出', success: 1, createdAt: '2026-09-01 10:00:00' }]
 const saved = { configs: [], deletes: [] }
 let failures = 0
 
@@ -44,7 +45,16 @@ function check(name, cond) {
       if (row) Object.assign(row, { host: '', username: '', remotePath: '', command: '' })
       return route.fulfill({ json: {} })
     }
-    if (url.pathname === '/api/deployment/run') return route.fulfill({ json: 'step1\n[部署完成]' })
+    if (url.pathname === '/api/deployment/run') {
+      const projectId = req.postDataJSON().projectId
+      deployLogs.unshift({ id: deployLogs.length + 1, projectId, projectName: projectId === 1 ? 'proj-one' : 'proj-two', host: 'deploy@a.com', output: 'step1\n[部署完成]', success: 1, createdAt: '2026-09-28 12:00:00' })
+      return route.fulfill({ json: 'step1\n[部署完成]' })
+    }
+    if (url.pathname === '/api/deployment/logs') {
+      const projectId = Number(url.searchParams.get('projectId')) || 0
+      const rows = projectId ? deployLogs.filter((log) => log.projectId === projectId) : deployLogs
+      return route.fulfill({ json: rows.slice(0, Number(url.searchParams.get('limit')) || 20).map((log) => ({ ...log })) })
+    }
     return route.fulfill({ json: {} })
   })
 
@@ -55,6 +65,7 @@ function check(name, cond) {
   check('已配置项目显示地址', (await page.locator('.deploy-table tbody tr').first().textContent()).includes('a.com'))
   check('未配置项目显示未配置', (await page.locator('.deploy-table tbody tr').last().textContent()).includes('未配置'))
   check('未配置项目禁用执行部署', await page.locator('.deploy-table .row-actions button.primary').last().isDisabled())
+  check('部署历史初始 1 条', (await page.locator('.history-row').count()) === 1)
   await page.screenshot({ path: shot('deploy-table.png') })
 
   await page.locator('.page-heading button', { hasText: '添加配置' }).click()
@@ -91,6 +102,14 @@ function check(name, cond) {
   await page.waitForTimeout(500)
   check('日志区显示项目名', (await page.locator('.deploy-log-section h2').textContent()).includes('部署日志 · proj-one'))
   check('日志包含输出与完成标记', (await page.locator('.deploy-output').textContent()).includes('[部署完成]'))
+
+  // 执行后历史新增,点击历史回看日志
+  await page.locator('.deploy-table tbody tr').first().locator('button', { hasText: '执行部署' }).click()
+  await page.waitForTimeout(500)
+  check('部署后历史新增为 3 条', (await page.locator('.history-row').count()) === 3)
+  check('最新历史排在最前', (await page.locator('.history-row').first().textContent()).includes('2026-09-28 12:00:00'))
+  await page.locator('.history-row').last().click()
+  check('点击历史回看旧日志', (await page.locator('.deploy-output').textContent()).includes('历史输出'))
   await page.screenshot({ path: shot('deploy-run.png') })
 
   await browser.close()

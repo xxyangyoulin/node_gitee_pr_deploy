@@ -42,6 +42,13 @@ window.releaseConsole = {
     }
     return output
   },
+  listDeploymentLogs: (query: { projectId?: number; limit?: number } = {}) => {
+    const params = new URLSearchParams()
+    if (query.projectId) params.set('projectId', String(query.projectId))
+    if (query.limit) params.set('limit', String(query.limit))
+    const queryString = params.toString()
+    return request(`/api/deployment/logs${queryString ? `?${queryString}` : ''}`)
+  },
   listPullRequests: (input) => request('/api/gitee/pulls', { method: 'POST', body: JSON.stringify(input) }),
   pullRequestDetail: (input) => request('/api/gitee/pull-detail', { method: 'POST', body: JSON.stringify(input) }),
   pullRequestLogs: (input) => request('/api/gitee/pull-logs', { method: 'POST', body: JSON.stringify(input) }),

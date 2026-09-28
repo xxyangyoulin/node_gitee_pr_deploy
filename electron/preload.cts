@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('releaseConsole', {
   listDeploymentServers: () => ipcRenderer.invoke('deployment:list-servers'),
   saveDeploymentConfig: (input: { projectId: number; host: string; username: string; remotePath: string; command: string }) => ipcRenderer.invoke('deployment:save-config', input),
   runDeployment: (projectId: number, onChunk?: (text: string) => void) => ipcRenderer.invoke('deployment:run', { projectId }).then((output: string) => { onChunk?.(output); return output }),
+  listDeploymentLogs: (query: { projectId?: number; limit?: number } = {}) => ipcRenderer.invoke('deployment:list-logs', query),
   listPullRequests: (input: { repository: string; token: string }) => ipcRenderer.invoke('gitee:list-pulls', input),
   pullRequestFiles: (input: { repository: string; token: string; number: number }) => ipcRenderer.invoke('gitee:pull-files', input),
   approvePullRequest: (input: { repository: string; token: string; number: number }) => ipcRenderer.invoke('gitee:approve-pull', input),

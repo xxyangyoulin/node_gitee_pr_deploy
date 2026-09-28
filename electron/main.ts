@@ -16,6 +16,7 @@ function openDatabase() {
   database.exec('CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, repository TEXT NOT NULL, token TEXT NOT NULL DEFAULT "", open_prs INTEGER NOT NULL DEFAULT 0)')
   database.exec('CREATE TABLE IF NOT EXISTS deployment_configs (project_id INTEGER PRIMARY KEY, host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", remote_path TEXT NOT NULL DEFAULT "", command TEXT NOT NULL DEFAULT "", FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE)')
   database.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT "")')
+  database.exec('CREATE TABLE IF NOT EXISTS deployment_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, project_name TEXT NOT NULL DEFAULT "", host TEXT NOT NULL DEFAULT "", output TEXT NOT NULL DEFAULT "", success INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
 }
 
 const defaultSettings = { prHead: 'dock', prBase: 'master', mergeMethod: 'merge' }
@@ -74,14 +75,27 @@ function registerHandlers() {
   ipcMain.handle('deployment:run', (_, input: { projectId: number }) => {
     const config = database.prepare('SELECT host, username, remote_path AS remotePath, command FROM deployment_configs WHERE project_id = ?').get(input.projectId) as { host: string; username: string; remotePath: string; command: string } | undefined
     if (!config?.host || !config.username || !config.remotePath || !config.command) throw new Error('请先完整配置部署信息')
+    const projectName = (database.prepare('SELECT name FROM projects WHERE id = ?').get(input.projectId) as any)?.name ?? ''
+    const createdAt = new Date().toISOString().replace('T', ' ').slice(0, 19)
+    const logId = Number(database.prepare('INSERT INTO deployment_logs (project_id, project_name, host, created_at) VALUES (?, ?, ?, ?)').run(input.projectId, projectName, `${config.username}@${config.host}`, createdAt).lastInsertRowid)
     return new Promise((resolve, reject) => {
       const child = spawn('ssh', ['-o', 'BatchMode=yes', `${config.username}@${config.host}`, `cd ${config.remotePath} && ${config.command}`])
       let output = ''
       child.stdout.on('data', (data) => { output += data.toString() })
       child.stderr.on('data', (data) => { output += data.toString() })
-      child.on('error', reject)
-      child.on('close', (code) => code === 0 ? resolve(output) : reject(new Error(output || `ssh exited with code ${code}`)))
+      child.on('error', (error) => { database.prepare('UPDATE deployment_logs SET output = ?, success = 0 WHERE id = ?').run(`${output}\n[错误] ${error.message}`, logId); reject(error) })
+      child.on('close', (code) => {
+        const marker = code === 0 ? '\n[部署完成]' : `\n[部署失败，退出码 ${code}]`
+        database.prepare('UPDATE deployment_logs SET output = ?, success = ? WHERE id = ?').run(output + marker, code === 0 ? 1 : 0, logId)
+        code === 0 ? resolve(output + marker) : reject(new Error(output + marker))
+      })
     })
+  })
+  ipcMain.handle('deployment:list-logs', (_, query: { projectId?: number; limit?: number } = {}) => {
+    const limit = Math.min(Number(query.limit) || 20, 100)
+    return query.projectId
+      ? database.prepare('SELECT id, project_id AS projectId, project_name AS projectName, host, output, success, created_at AS createdAt FROM deployment_logs WHERE project_id = ? ORDER BY id DESC LIMIT ?').all(query.projectId, limit)
+      : database.prepare('SELECT id, project_id AS projectId, project_name AS projectName, host, output, success, created_at AS createdAt FROM deployment_logs ORDER BY id DESC LIMIT ?').all(limit)
   })
   ipcMain.handle('gitee:list-pulls', (_, input: RepositoryInput) => giteeRequest(input, 'pulls?state=open&per_page=50'))
   ipcMain.handle('gitee:pull-files', (_, input: RepositoryInput & { number: number }) => giteeRequest(input, `pulls/${input.number}/files`))

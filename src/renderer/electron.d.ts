@@ -12,6 +12,7 @@ interface Window {
     listDeploymentServers(): Promise<Array<{ host: string; username: string }>>
     saveDeploymentConfig(input: { projectId: number; host: string; username: string; remotePath: string; command: string }): Promise<unknown>
     runDeployment(projectId: number, onChunk?: (text: string) => void): Promise<string>
+    listDeploymentLogs(query?: { projectId?: number; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; host: string; output: string; success: number; createdAt: string }>>
     listPullRequests(input: { repository: string; token: string }): Promise<any[]>
     pullRequestDetail(input: { repository: string; token: string; number: number }): Promise<any>
     pullRequestLogs(input: { repository: string; token: string; number: number }): Promise<any[]>

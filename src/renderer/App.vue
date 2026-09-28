@@ -32,6 +32,7 @@ const token = ref('')
 
 const pulls = ref<PullItem[]>([])
 const loadingPulls = ref(false)
+const pullLoadErrors = ref<string[]>([])
 const pullFilter = ref<number | 'all'>('all')
 const filteredPulls = computed(() => pullFilter.value === 'all' ? pulls.value : pulls.value.filter((item) => item.project.id === pullFilter.value))
 const selectedPull = ref<PullItem | null>(null)
@@ -46,25 +47,46 @@ const testPassed = ref(false)
 const mergeConfirming = ref(false)
 let mergeConfirmTimer: ReturnType<typeof setTimeout> | undefined
 const oneClickAction = ref<'' | 'master' | 'deploy'>('')
-const oneClickBusy = ref(false)
 let oneClickTimer: ReturnType<typeof setTimeout> | undefined
-const oneClickProgress = ref<null | { kind: 'master' | 'deploy'; step: number; total: number; log: string; running: boolean }>(null)
+
+type OneClickRun = {
+  project: Project
+  pull: any
+  title: string
+  created: any
+  withDeploy: boolean
+  direct: boolean
+  merged1: boolean
+  created2: boolean
+  merged2: boolean
+  deployed: boolean
+  lastDeploy: { createdAt: string; success: number } | null
+  deployTarget: { host: string; username: string; remotePath: string } | null
+  log: string
+  failed: boolean
+  running: boolean
+}
+const oneClickRun = ref<OneClickRun | null>(null)
 const modalLogEl = ref<HTMLElement | null>(null)
 
 const oneClickSteps = computed(() => {
-  const progress = oneClickProgress.value
-  if (!progress) return []
+  const run = oneClickRun.value
+  if (!run) return []
   const prHead = settings.value.prHead
   const prBase = settings.value.prBase
-  const labels = [`合并 ${prHead} 分支 PR`, `创建 ${prHead} → ${prBase} 分支 PR`, `合并 ${prBase} 分支 PR`]
-  if (progress.kind === 'deploy') labels.push('执行部署')
-  return labels.map((label, index) => {
-    const num = index + 1
-    let state = 'pending'
-    if (num < progress.step || (!progress.running && num <= progress.step)) state = 'done'
-    else if (num === progress.step && progress.running) state = 'running'
-    return { label, state }
-  })
+  const rows: Array<{ label: string; done: boolean }> = []
+  if (run.direct) rows.push({ label: `合并 ${prHead} → ${prBase} 分支 PR`, done: run.merged1 })
+  else {
+    rows.push({ label: `合并 ${prHead} 分支 PR`, done: run.merged1 })
+    rows.push({ label: `创建 ${prHead} → ${prBase} 分支 PR`, done: run.created2 })
+    rows.push({ label: `合并 ${prBase} 分支 PR`, done: run.merged2 })
+  }
+  if (run.withDeploy) rows.push({ label: '执行部署', done: run.deployed })
+  const firstOpen = rows.findIndex((row) => !row.done)
+  return rows.map((row, index) => ({
+    label: row.label,
+    state: row.done ? 'done' : index === firstOpen ? (run.failed ? 'failed' : run.running ? 'running' : 'pending') : 'pending',
+  }))
 })
 
 const oneClickTarget = computed(() => {
@@ -79,6 +101,17 @@ const oneClickTarget = computed(() => {
   return { ...item, head, base }
 })
 
+const isDockToMaster = computed(() => {
+  const item = selectedPull.value
+  if (!item) return false
+  const prHead = settings.value.prHead
+  const prBase = settings.value.prBase
+  if (!prHead || !prBase || prHead === prBase) return false
+  return String(item.pull.head?.ref ?? '') === prHead && String(item.pull.base?.ref ?? '') === prBase
+})
+
+const showOneClickDeploy = computed(() => !!oneClickTarget.value || isDockToMaster.value)
+
 const settings = ref({ prHead: 'dock', prBase: 'master', mergeMethod: 'merge' })
 const meta = ref({ version: '', dataPath: '' })
 
@@ -90,6 +123,8 @@ const creatingPr = ref(false)
 const deploymentRows = ref<DeploymentRow[]>([])
 const loadingDeployments = ref(false)
 const deploymentServers = ref<{ host: string; username: string }[]>([])
+const deployHistory = ref<Array<{ id: number; projectId: number; projectName: string; host: string; output: string; success: number; createdAt: string }>>([])
+const activeHistoryId = ref(0)
 const configModal = ref(false)
 const configForm = ref({ projectId: 0, projectName: '', isNew: true, host: '', username: '', remotePath: '', command: '' })
 const configFormError = ref('')
@@ -384,6 +419,10 @@ async function saveAppSettings() {
   mergeMessage.value = '设置已保存'
 }
 
+async function loadDeployHistory() {
+  try { deployHistory.value = await window.releaseConsole.listDeploymentLogs({ limit: 20 }) } catch { }
+}
+
 async function loadDeploymentRows() {
   if (!projects.value.length) { deploymentRows.value = []; return }
   loadingDeployments.value = true
@@ -393,6 +432,12 @@ async function loadDeploymentRows() {
   } finally {
     loadingDeployments.value = false
   }
+  loadDeployHistory()
+}
+
+function showHistory(entry: { id: number; projectId: number; projectName: string; output: string }) {
+  activeHistoryId.value = entry.id
+  deployLog.value = { projectId: entry.projectId, projectName: entry.projectName, output: entry.output, running: false }
 }
 
 function pickHost(host: string) {
@@ -462,21 +507,25 @@ async function runProjectDeployment(row: DeploymentRow) {
     deployLog.value.output += (deployLog.value.output ? '\n' : '') + message
   } finally {
     deployLog.value.running = false
+    loadDeployHistory()
   }
 }
 
 async function loadPulls() {
-  if (!projects.value.length) { pulls.value = []; return }
+  if (!projects.value.length) { pulls.value = []; pullLoadErrors.value = []; return }
   loadingPulls.value = true
   errorMessage.value = ''
   try {
     const results = await Promise.all(projects.value.map(async (project) => {
       try {
         const list = await window.releaseConsole.listPullRequests({ repository: project.repository, token: project.token })
-        return list.map((pull: any) => ({ project, pull }))
-      } catch { return [] }
+        return { items: list.map((pull: any) => ({ project, pull })), error: '' }
+      } catch (error) {
+        return { items: [] as PullItem[], error: `${project.name}：${error instanceof Error ? error.message : '加载失败'}` }
+      }
     }))
-    pulls.value = results.flat().sort((a, b) => (Date.parse(String(b.pull.created_at ?? '')) || 0) - (Date.parse(String(a.pull.created_at ?? '')) || 0))
+    pulls.value = results.flatMap((result) => result.items).sort((a, b) => (Date.parse(String(b.pull.created_at ?? '')) || 0) - (Date.parse(String(a.pull.created_at ?? '')) || 0))
+    pullLoadErrors.value = results.map((result) => result.error).filter(Boolean)
     for (const project of projects.value) {
       project.openPrs = pulls.value.filter((item) => item.project.id === project.id).length
     }
@@ -567,14 +616,22 @@ function resetOneClickConfirm() {
 }
 
 function requestOneClick(kind: 'master' | 'deploy') {
-  if (oneClickBusy.value) return
+  if (oneClickRun.value?.running) return
   if (oneClickAction.value !== kind) {
     oneClickAction.value = kind
     oneClickTimer = setTimeout(resetOneClickConfirm, 2000)
     return
   }
   resetOneClickConfirm()
-  void oneClickMaster(kind === 'deploy')
+  if (kind === 'deploy' && !oneClickTarget.value && isDockToMaster.value) {
+    const target = selectedPull.value!
+    oneClickRun.value = { project: target.project, pull: target.pull, title: '', created: null, withDeploy: true, direct: true, merged1: false, created2: false, merged2: false, deployed: false, lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
+  } else {
+    const target = oneClickTarget.value
+    if (!target) return
+    oneClickRun.value = { project: target.project, pull: target.pull, title: String(target.pull.title ?? ''), created: null, withDeploy: kind === 'deploy', direct: false, merged1: false, created2: false, merged2: false, deployed: false, lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
+  }
+  void runOneClick()
 }
 
 async function findCreatedPull(project: Project, title: string) {
@@ -587,47 +644,75 @@ async function findCreatedPull(project: Project, title: string) {
   throw new Error('未找到新创建的 PR')
 }
 
-async function oneClickMaster(withDeploy: boolean) {
-  const target = oneClickTarget.value
-  if (!target) return
-  const { project, pull } = target
-  const title = String(pull.title ?? '')
-  const total = withDeploy ? 4 : 3
-  oneClickBusy.value = true
-  oneClickProgress.value = { kind: withDeploy ? 'deploy' : 'master', step: 1, total, log: '', running: true }
+async function findCreatedPullQuiet(project: Project, title: string) {
   try {
-    await mergeFlow(project, pull)
-    if (oneClickProgress.value) oneClickProgress.value.step = 2
-    await window.releaseConsole.createPullRequest({ repository: project.repository, token: project.token, title, head: settings.value.prHead, base: settings.value.prBase })
-    if (oneClickProgress.value) oneClickProgress.value.step = 3
-    const created = await findCreatedPull(project, title)
-    await mergeFlow(project, created)
-    if (withDeploy) {
-      if (oneClickProgress.value) oneClickProgress.value.step = 4
-      if (!deploymentRows.value.length) { try { await loadDeploymentRows() } catch { } }
-      const row = deploymentRows.value.find((item) => item.projectId === project.id)
-      if (!row || !configComplete(row)) throw new Error(`项目 ${project.name} 未配置部署，无法执行部署`)
-      deployLog.value = { projectId: row.projectId, projectName: row.projectName, output: '', running: true }
-      try {
-        deployLog.value.output = await window.releaseConsole.runDeployment(row.projectId, (text) => {
-          deployLog.value.output += text
-          if (oneClickProgress.value) oneClickProgress.value.log += text
-          nextTick(() => {
-            modalLogEl.value?.scrollTo({ top: modalLogEl.value.scrollHeight })
-            deployOutputEl.value?.scrollTo({ top: deployOutputEl.value.scrollHeight })
-          })
-        })
-      } finally {
-        deployLog.value.running = false
+    await loadPulls()
+    return pulls.value.find((item) => item.project.id === project.id && String(item.pull.head?.ref) === settings.value.prHead && String(item.pull.base?.ref) === settings.value.prBase && String(item.pull.title ?? '') === title)?.pull ?? null
+  } catch { return null }
+}
+
+async function runDeployStage(run: OneClickRun) {
+  try {
+    const logs = await window.releaseConsole.listDeploymentLogs({ projectId: run.project.id, limit: 1 })
+    run.lastDeploy = logs[0] ? { createdAt: logs[0].createdAt, success: logs[0].success } : null
+  } catch { }
+  if (!deploymentRows.value.length) { try { await loadDeploymentRows() } catch { } }
+  const row = deploymentRows.value.find((item) => item.projectId === run.project.id)
+  if (!row || !configComplete(row)) throw new Error(`项目 ${run.project.name} 未配置部署，无法执行部署`)
+  run.deployTarget = { host: row.host, username: row.username, remotePath: row.remotePath }
+  deployLog.value = { projectId: row.projectId, projectName: row.projectName, output: '', running: true }
+  try {
+    deployLog.value.output = await window.releaseConsole.runDeployment(row.projectId, (text) => {
+      deployLog.value.output += text
+      run.log += text
+      nextTick(() => {
+        modalLogEl.value?.scrollTo({ top: modalLogEl.value.scrollHeight })
+        deployOutputEl.value?.scrollTo({ top: deployOutputEl.value.scrollHeight })
+      })
+    })
+  } finally {
+    deployLog.value.running = false
+  }
+}
+
+async function runOneClick() {
+  const run = oneClickRun.value
+  if (!run || run.running) return
+  run.failed = false
+  run.running = true
+  try {
+    if (!run.merged1) {
+      await mergeFlow(run.project, run.pull)
+      run.merged1 = true
+    }
+    if (!run.direct) {
+      if (!run.created2) {
+        const existing = await findCreatedPullQuiet(run.project, run.title)
+        if (existing) {
+          run.created = existing
+        } else {
+          await window.releaseConsole.createPullRequest({ repository: run.project.repository, token: run.project.token, title: run.title, head: settings.value.prHead, base: settings.value.prBase })
+          run.created = await findCreatedPull(run.project, run.title)
+        }
+        run.created2 = true
+      }
+      if (!run.merged2) {
+        await mergeFlow(run.project, run.created)
+        run.merged2 = true
       }
     }
-    mergeMessage.value = withDeploy ? '一键部署完成' : '一键合并完成'
+    if (run.withDeploy && !run.deployed) {
+      await runDeployStage(run)
+      run.deployed = true
+    }
+    mergeMessage.value = run.withDeploy ? '一键部署完成' : '一键合并完成'
     await loadPulls()
   } catch (error) {
+    run.failed = true
     mergeMessage.value = error instanceof Error ? error.message : '一键操作失败'
   } finally {
-    oneClickBusy.value = false
-    if (oneClickProgress.value) oneClickProgress.value.running = false
+    run.running = false
+    loadDeployHistory()
   }
 }
 
@@ -789,14 +874,17 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             <div><h1>PR</h1><p>{{ selectedPull ? `已选 ${selectedPull.project.name} #${selectedPull.pull.number} · ${selectedPull.pull.title}` : '汇总所有项目的开放 PR，点击左侧 PR 查看变更与操作。' }}</p></div>
             <div class="heading-actions">
               <select v-model="pullFilter" class="filter-select"><option value="all">全部项目</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}</option></select>
-              <button :class="{ passed: reviewPassed }" :disabled="!selectedPull || reviewPassed" @click="approveSelectedPull">{{ reviewPassed ? '审查已通过' : '审查通过' }}</button><button :class="{ passed: testPassed }" :disabled="!selectedPull || testPassed" @click="requestTestPassed">{{ testPassed ? '测试已通过' : '测试通过' }}</button><button class="merge-action" :class="{ ready: reviewPassed && testPassed, confirming: mergeConfirming }" :disabled="!selectedPull" @click="requestMerge">{{ mergeConfirming ? '再次点击确认合并' : reviewPassed && testPassed ? '合并 PR' : '一键审查、测试并合并' }}</button><button v-if="oneClickTarget" class="one-click" :class="{ confirming: oneClickAction === 'master' }" :disabled="oneClickBusy" @click="requestOneClick('master')">{{ oneClickAction === 'master' ? '再次点击确认' : `一键 ${settings.prBase}` }}</button><button v-if="oneClickTarget" class="one-click" :class="{ confirming: oneClickAction === 'deploy' }" :disabled="oneClickBusy" @click="requestOneClick('deploy')">{{ oneClickAction === 'deploy' ? '再次点击确认' : '一键部署' }}</button><button class="primary" :disabled="!projects.length" @click="openCreatePr">创建 PR</button><button :disabled="loadingPulls" @click="loadPulls">{{ loadingPulls ? '加载中…' : '刷新' }}</button>
+              <button :class="{ passed: reviewPassed }" :disabled="!selectedPull || reviewPassed" @click="approveSelectedPull">{{ reviewPassed ? '审查已通过' : '审查通过' }}</button><button :class="{ passed: testPassed }" :disabled="!selectedPull || testPassed" @click="requestTestPassed">{{ testPassed ? '测试已通过' : '测试通过' }}</button><button class="merge-action" :class="{ ready: reviewPassed && testPassed, confirming: mergeConfirming }" :disabled="!selectedPull" @click="requestMerge">{{ mergeConfirming ? '再次点击确认合并' : reviewPassed && testPassed ? '合并 PR' : '一键审查、测试并合并' }}</button><button v-if="oneClickTarget" class="one-click" :class="{ confirming: oneClickAction === 'master' }" :disabled="!!oneClickRun?.running" @click="requestOneClick('master')">{{ oneClickAction === 'master' ? '再次点击确认' : `一键 ${settings.prBase}` }}</button><button v-if="showOneClickDeploy" class="one-click" :class="{ confirming: oneClickAction === 'deploy' }" :disabled="!!oneClickRun?.running" @click="requestOneClick('deploy')">{{ oneClickAction === 'deploy' ? '再次点击确认' : '一键部署' }}</button><button class="primary" :disabled="!projects.length" @click="openCreatePr">创建 PR</button><button :disabled="loadingPulls" @click="loadPulls">{{ loadingPulls ? '加载中…' : '刷新' }}</button>
             </div>
           </div>
           <div v-if="!projects.length" class="empty-state">还没有项目，请先在项目页添加。</div>
-          <div v-else class="pr-workspace">
+          <template v-else>
+            <div v-if="pullLoadErrors.length" class="load-warning">部分项目 PR 加载失败：{{ pullLoadErrors.join('；') }}</div>
+            <div class="pr-workspace">
             <aside class="pr-list"><div v-if="!filteredPulls.length && !loadingPulls" class="list-empty">没有开放 PR</div><button v-for="item in filteredPulls" :key="`${item.project.id}-${item.pull.number}`" :class="['pr-item', { selected: isSelected(item) }]" @click="selectPull(item)"><span class="project-badge" :title="item.project.repository">{{ item.project.name }}</span><strong>#{{ item.pull.number }} {{ item.pull.title }}</strong><span>{{ authorOf(item.pull) }}</span><small class="pr-branches"><span class="branch-chip branch-head" :class="{ 'branch-main': isMainBranch(item.pull.head?.ref || item.pull.head?.label) }" :title="item.pull.head?.label || item.pull.head?.ref">{{ item.pull.head?.ref || item.pull.head?.label || '?' }}</span><span class="branch-arrow">→</span><span class="branch-chip branch-base" :class="{ 'branch-main': isMainBranch(item.pull.base?.ref || item.pull.base?.label) }" :title="item.pull.base?.label || item.pull.base?.ref">{{ item.pull.base?.ref || item.pull.base?.label || '?' }}</span></small><small class="pr-time">{{ formatTime(item.pull.created_at) }}</small></button></aside>
             <section class="code-panel" :class="{ 'has-list': files.length > 0 && !loadingFiles }" :style="files.length > 0 && !loadingFiles ? { gridTemplateColumns: `${fileListWidth}px 5px minmax(0, 1fr)` } : undefined"><aside v-if="files.length > 0 && !loadingFiles" class="file-list"><button v-for="row in fileTreeRows" :key="row.type + ':' + row.key" :class="['file-item', { dir: row.type === 'dir', active: row.type === 'file' && row.index === activeFileIndex }]" :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }" :title="row.key" @click="row.type === 'dir' ? toggleDir(row.key) : jumpToFile(row.index)"><span v-if="row.type === 'dir'" class="file-toggle">{{ isDirExpanded(row.key) || fileQuery.trim() ? '▾' : '▸' }}</span><span class="file-name">{{ row.name }}</span><span class="file-stat"><span class="stat-added">+{{ row.added }}</span><span class="stat-removed">-{{ row.removed }}</span></span></button></aside><div v-if="files.length > 0 && !loadingFiles" class="resize-handle" @mousedown="startResize"></div><div class="files-main"><div v-if="loadingFiles" class="empty-state">加载文件中…</div><div v-else-if="!selectedPull" class="empty-state">选择一个 PR 查看变更与操作</div><div v-else-if="!files.length" class="empty-state">该 PR 没有可展示的文件</div><template v-else><div class="files-toolbar"><span>{{ fileQuery.trim() ? `${matchedCount}/${files.length} 个文件` : `${files.length} 个文件` }}</span><span class="toolbar-stats"><span class="stat-added">+{{ totalStats.added }}</span><span class="stat-removed">-{{ totalStats.removed }}</span></span><span class="toolbar-spacer"></span><input v-model="fileQuery" class="file-search" placeholder="搜索文件名" /><button @click="setAllFilesExpanded(true)">全部展开</button><button @click="setAllFilesExpanded(false)">全部收起</button></div><div ref="filesScrollEl" class="files-scroll" @scroll="onFilesScroll"><div v-for="(file, index) in files" :id="`pr-file-card-${index}`" :key="file.filename" v-show="fileMatches(file.filename)" :data-index="index" class="file-card"><button class="file-card-header" @click="toggleFile(file.filename)"><span class="file-toggle">{{ isFileExpanded(file.filename) ? '▾' : '▸' }}</span><span class="file-name" :title="file.filename">{{ file.filename }}</span><span class="file-stat"><span class="stat-added">+{{ fileStats[index]?.added ?? 0 }}</span><span class="stat-removed">-{{ fileStats[index]?.removed ?? 0 }}</span></span><span class="copy-btn" title="复制 diff" @click.stop="copyPatch(file)">复制</span><span class="copy-btn full-toggle" :class="{ active: isFullFileView(file.filename) }" title="查看完整文件 / 切回 diff" @click.stop="toggleFullFile(file)">{{ isFullFileView(file.filename) ? '返回 diff' : '完整文件' }}</span></button><pre v-if="isFileExpanded(file.filename) && isFullFileView(file.filename)" class="code-view file-diff full-file">{{ fullFileLoading[file.filename] ? '加载中…' : fullFileContents[file.filename] || '无法加载文件内容' }}</pre><pre v-else-if="isFileExpanded(file.filename)" class="code-view file-diff"><code><span v-for="(line, lineIndex) in fileDiffs[index]" :key="lineIndex" :class="['code-line', `line-${line.kind}`]"><span class="line-prefix">{{ line.prefix }}</span><span v-html="line.html"></span></span></code></pre></div></div></template></div></section>
           </div>
+          </template>
         </section>
         <section v-else-if="activePage === 'deployments'" class="page">
           <div class="page-heading"><div><h1>部署</h1><p>管理各项目的部署配置，执行部署并查看日志。</p></div><button class="primary" :disabled="!projects.length" @click="openAddConfig">添加配置</button></div>
@@ -819,6 +907,16 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           <div v-if="deployLog.projectId" class="settings-section deploy-log-section">
             <h2>部署日志 · {{ deployLog.projectName }}<span v-if="deployLog.running" class="deploy-running">执行中…</span></h2>
             <pre ref="deployOutputEl" class="deploy-output">{{ deployLog.output || '等待输出…' }}</pre>
+          </div>
+          <div class="settings-section">
+            <h2>部署历史</h2>
+            <div v-if="!deployHistory.length" class="settings-empty">暂无部署记录。</div>
+            <div v-for="entry in deployHistory" :key="entry.id" :class="['history-row', { active: activeHistoryId === entry.id }]" @click="showHistory(entry)">
+              <span :class="entry.success ? 'stat-added' : 'stat-removed'">{{ entry.success ? '✓' : '✗' }}</span>
+              <span class="history-name">{{ entry.projectName }}</span>
+              <span class="history-host">{{ entry.host }}</span>
+              <span class="history-time">{{ entry.createdAt }}</span>
+            </div>
           </div>
         </section>
         <section v-else class="page">
@@ -856,14 +954,16 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
       <form class="modal" @submit.prevent="saveConfig"><h2>{{ configForm.isNew ? '添加部署配置' : '编辑部署配置' }}</h2><div v-if="configFormError" class="error-message">{{ configFormError }}</div><label>项目<select v-if="configForm.isNew" v-model="configForm.projectId"><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}（{{ project.repository }}）</option></select><input v-else :value="configForm.projectName" disabled /></label><label>服务器地址<span class="combo"><input v-model="configForm.host" placeholder="example.com" @focus="showHostSuggestions = true" @blur="showHostSuggestions = false" /><span v-if="showHostSuggestions && hostSuggestions.length" class="combo-menu"><button type="button" v-for="host in hostSuggestions" :key="host" @mousedown.prevent="pickHost(host)">{{ host }}</button></span></span></label><label>SSH 用户<span class="combo"><input v-model="configForm.username" placeholder="deploy" @focus="showUserSuggestions = true" @blur="showUserSuggestions = false" /><span v-if="showUserSuggestions && userSuggestions.length" class="combo-menu"><button type="button" v-for="username in userSuggestions" :key="username" @mousedown.prevent="pickUser(username)">{{ username }}</button></span></span></label><label>远程目录<input v-model="configForm.remotePath" placeholder="/srv/app" /></label><label>部署命令<input v-model="configForm.command" placeholder="git pull && ./deploy.sh" /></label><div class="modal-actions"><button type="button" @click="configModal = false">取消</button><button class="primary" type="submit" :disabled="savingConfig">{{ savingConfig ? '保存中…' : '保存' }}</button></div></form>
     </div>
     <div v-if="toastMessage" class="toast">{{ toastMessage }}</div>
-    <div v-if="oneClickProgress" class="modal-backdrop">
+    <div v-if="oneClickRun" class="modal-backdrop">
       <div class="modal one-click-modal">
-        <h2>{{ oneClickProgress.kind === 'deploy' ? '一键部署' : `一键 ${settings.prBase}` }}</h2>
+        <h2>{{ oneClickRun.direct || oneClickRun.withDeploy ? '一键部署' : `一键 ${settings.prBase}` }}</h2>
         <ol class="progress-steps">
-          <li v-for="(step, index) in oneClickSteps" :key="index" :class="step.state"><span class="step-dot">{{ step.state === 'done' ? '✓' : index + 1 }}</span>{{ step.label }}</li>
+          <li v-for="(step, index) in oneClickSteps" :key="index" :class="step.state"><span class="step-dot">{{ step.state === 'done' ? '✓' : step.state === 'failed' ? '✗' : index + 1 }}</span>{{ step.label }}</li>
         </ol>
-        <pre v-if="oneClickProgress.kind === 'deploy'" ref="modalLogEl" class="deploy-output">{{ oneClickProgress.log || '等待部署输出…' }}</pre>
-        <div class="modal-actions"><button :disabled="oneClickProgress.running" @click="oneClickProgress = null">{{ oneClickProgress.running ? '执行中…' : '关闭' }}</button></div>
+        <div v-if="oneClickRun.deployTarget" class="deploy-target-info">部署目标：<code>{{ oneClickRun.deployTarget.username }}@{{ oneClickRun.deployTarget.host }}</code><span class="target-sep">·</span>远程目录：<code>{{ oneClickRun.deployTarget.remotePath }}</code></div>
+        <div v-if="oneClickRun.lastDeploy" class="deploy-target-info">上次部署：<code>{{ oneClickRun.lastDeploy.createdAt }}</code><span class="target-sep">·</span>结果：<code>{{ oneClickRun.lastDeploy.success ? '成功' : '失败' }}</code></div>
+        <pre v-if="oneClickRun.withDeploy" ref="modalLogEl" class="deploy-output">{{ oneClickRun.log || '等待部署输出…' }}</pre>
+        <div class="modal-actions"><button v-if="oneClickRun.failed" class="primary" :disabled="oneClickRun.running" @click="runOneClick()">重试</button><button :disabled="oneClickRun.running" @click="oneClickRun = null">{{ oneClickRun.running ? '执行中…' : '关闭' }}</button></div>
       </div>
     </div>
     <div v-if="confirmMessage" class="modal-backdrop" @click.self="cancelConfirmation"><div class="confirm-modal"><h3>请确认操作</h3><p>{{ confirmMessage }}</p><div class="modal-actions"><button @click="cancelConfirmation">取消</button><button class="primary" @click="acceptConfirmation">确认</button></div></div></div>

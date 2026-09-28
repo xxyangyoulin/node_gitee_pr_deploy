@@ -12,6 +12,7 @@ const version = (() => { try { return JSON.parse(readFileSync(join(root, 'packag
 database.exec('CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, repository TEXT NOT NULL, token TEXT NOT NULL DEFAULT "", open_prs INTEGER NOT NULL DEFAULT 0)')
 database.exec('CREATE TABLE IF NOT EXISTS deployment_configs (project_id INTEGER PRIMARY KEY, host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", remote_path TEXT NOT NULL DEFAULT "", command TEXT NOT NULL DEFAULT "")')
 database.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT "")')
+database.exec('CREATE TABLE IF NOT EXISTS deployment_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, project_name TEXT NOT NULL DEFAULT "", host TEXT NOT NULL DEFAULT "", output TEXT NOT NULL DEFAULT "", success INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
 
 const defaultSettings = { prHead: 'dock', prBase: 'master', mergeMethod: 'merge' }
 
@@ -68,6 +69,15 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   }
   if (request.method === 'DELETE' && path.startsWith('/api/projects/')) { const id = Number(path.split('/').pop()); database.prepare('DELETE FROM projects WHERE id=?').run(id); database.prepare('DELETE FROM deployment_configs WHERE project_id=?').run(id); return json(response, 200, {}) }
   if (path === '/api/deployment/configs' && request.method === 'GET') return json(response, 200, database.prepare('SELECT p.id AS projectId, p.name AS projectName, c.host, c.username, c.remote_path AS remotePath, c.command FROM projects p LEFT JOIN deployment_configs c ON c.project_id = p.id ORDER BY p.id DESC').all())
+  if (path === '/api/deployment/logs' && request.method === 'GET') {
+    const params = new URL(request.url || '', 'http://localhost').searchParams
+    const projectId = Number(params.get('projectId')) || 0
+    const limit = Math.min(Number(params.get('limit')) || 20, 100)
+    const rows = projectId
+      ? database.prepare('SELECT id, project_id AS projectId, project_name AS projectName, host, output, success, created_at AS createdAt FROM deployment_logs WHERE project_id=? ORDER BY id DESC LIMIT ?').all(projectId, limit)
+      : database.prepare('SELECT id, project_id AS projectId, project_name AS projectName, host, output, success, created_at AS createdAt FROM deployment_logs ORDER BY id DESC LIMIT ?').all(limit)
+    return json(response, 200, rows)
+  }
   if (path === '/api/deployment/servers' && request.method === 'GET') return json(response, 200, database.prepare("SELECT host,username FROM deployment_configs WHERE host != '' GROUP BY host").all())
   if (path === '/api/settings' && request.method === 'GET') return json(response, 200, readSettings())
   if (path === '/api/settings' && request.method === 'POST') return json(response, 200, saveSettings(input))
@@ -87,15 +97,33 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   return json(response, 404, { message: 'Not found' })
 }
 
+function recordDeployStart(projectId: number, projectName: string, host: string) {
+  const createdAt = new Date().toISOString().replace('T', ' ').slice(0, 19)
+  const result = database.prepare('INSERT INTO deployment_logs(project_id,project_name,host,created_at) VALUES(?,?,?,?)').run(projectId, projectName, host, createdAt)
+  return Number(result.lastInsertRowid)
+}
+
+function recordDeployEnd(id: number, output: string, success: boolean) {
+  database.prepare('UPDATE deployment_logs SET output=?, success=? WHERE id=?').run(output, success ? 1 : 0, id)
+}
+
 function runDeployment(response: import('node:http').ServerResponse, projectId: number) {
   const config = database.prepare('SELECT host,username,remote_path AS remotePath,command FROM deployment_configs WHERE project_id=?').get(projectId) as any
   if (!config?.host || !config.username || !config.remotePath || !config.command) return json(response, 400, { message: '请先完整配置部署信息' })
+  const projectName = (database.prepare('SELECT name FROM projects WHERE id=?').get(projectId) as any)?.name ?? ''
+  const logId = recordDeployStart(projectId, projectName, `${config.username}@${config.host}`)
   response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' })
   const child = spawn('ssh', ['-o', 'BatchMode=yes', `${config.username}@${config.host}`, `cd ${config.remotePath} && ${config.command}`])
-  child.stdout.on('data', (data) => response.write(data.toString()))
-  child.stderr.on('data', (data) => response.write(data.toString()))
-  child.on('error', (error) => { response.write(`\n[错误] ${error.message}`); response.end() })
-  child.on('close', (code) => { response.write(code === 0 ? '\n[部署完成]' : `\n[部署失败，退出码 ${code}]`); response.end() })
+  let collected = ''
+  child.stdout.on('data', (data) => { collected += data.toString(); response.write(data.toString()) })
+  child.stderr.on('data', (data) => { collected += data.toString(); response.write(data.toString()) })
+  child.on('error', (error) => { const text = `${collected}\n[错误] ${error.message}`; recordDeployEnd(logId, text, false); response.write(`\n[错误] ${error.message}`); response.end() })
+  child.on('close', (code) => {
+    const marker = code === 0 ? '\n[部署完成]' : `\n[部署失败，退出码 ${code}]`
+    recordDeployEnd(logId, collected + marker, code === 0)
+    response.write(marker)
+    response.end()
+  })
 }
 
 createServer(async (request, response) => {
