@@ -89,6 +89,7 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   if (request.method === 'POST' && path === '/api/gitee/pull-detail') return json(response, 200, await gitee(input, `pulls/${input.number}`))
   if (request.method === 'POST' && path === '/api/gitee/pull-logs') return json(response, 200, await gitee(input, `pulls/${input.number}/operate_logs`))
   if (request.method === 'POST' && path === '/api/gitee/pull-files') return json(response, 200, await gitee(input, `pulls/${input.number}/files`))
+  if (request.method === 'POST' && path === '/api/gitee/pull-commits') return json(response, 200, await gitee(input, `pulls/${input.number}/commits`))
   if (request.method === 'POST' && path === '/api/gitee/approve-pull') return json(response, 200, await gitee(input, `pulls/${input.number}/review`, { method: 'POST', body: new URLSearchParams({ force: 'true' }) }))
   if (request.method === 'POST' && path === '/api/gitee/test-pull') return json(response, 200, await gitee(input, `pulls/${input.number}/test`, { method: 'POST', body: new URLSearchParams({ force: 'true' }) }))
   if (request.method === 'POST' && path === '/api/gitee/file') return json(response, 200, await gitee(input, `contents/${input.path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(input.ref)}`))

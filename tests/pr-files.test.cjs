@@ -22,6 +22,10 @@ function check(name, cond) {
     if (path === '/api/gitee/pulls') return route.fulfill({ json: [{ number: 7, title: 'fake pr', head: { ref: 'dock' }, base: { ref: 'master' } }] })
     if (path === '/api/gitee/pull-logs') return route.fulfill({ json: [] })
     if (path === '/api/gitee/pull-files') return route.fulfill({ json: FILES })
+    if (path === '/api/gitee/pull-commits') return route.fulfill({ json: [
+      { sha: 'abc1234567890abcdef', commit: { message: 'fix: 修复登录问题\n\n详细说明', author: { name: 'alice', date: '2026-09-27T10:00:00+08:00' } } },
+      { sha: 'def9876543210abcdef', commit: { message: 'chore: 升级依赖', author: { name: 'bob', date: '2026-09-28T11:30:00+08:00' } } },
+    ] })
     if (path === '/api/gitee/file') return route.fulfill({ json: { content: Buffer.from('full file content line1\nline2').toString('base64') } })
     return route.fulfill({ json: {} })
   })
@@ -91,6 +95,18 @@ function check(name, cond) {
   await page.waitForTimeout(200)
   check('切回 diff 视图', (await page.locator('.full-file').count()) === 0 && (await page.locator('.file-diff').count()) === 6)
 
+  // 侧栏切换提交记录
+  check('侧栏默认文件页签', (await page.locator('.file-list-scroll .file-item').count()) > 0)
+  await page.locator('.sidebar-tabs button', { hasText: '提交记录' }).click()
+  await page.waitForTimeout(100)
+  check('切换后显示 2 条提交', (await page.locator('.commit-item').count()) === 2)
+  check('提交信息首行展示', (await page.locator('.commit-item').first().locator('.commit-message').textContent()) === 'fix: 修复登录问题')
+  check('短 SHA 展示', (await page.locator('.commit-item').first().locator('.commit-sha').textContent()) === 'abc1234')
+  check('提交时间展示', (await page.locator('.commit-item').first().locator('.history-time').textContent()) === '2026-09-27 10:00')
+  check('文件树随切换隐藏', (await page.locator('.file-list-scroll .file-item').count()) === 0)
+  await page.locator('.sidebar-tabs button', { hasText: '文件' }).click()
+  await page.waitForTimeout(100)
+  check('切回文件页签恢复树', (await page.locator('.file-list-scroll .file-item').count()) === 10)
   await page.screenshot({ path: shot('pr-files.png') })
   await browser.close()
   console.log(failures ? `\n${failures} failed` : '\nALL PASS')
