@@ -162,7 +162,7 @@ function check(name, cond) {
   await mergeBtn.click()
   check('首次点击进入确认态', (await mergeBtn.textContent()).includes('再次点击确认合并'))
   await page.waitForTimeout(2300)
-  check('2 秒后未点击自动还原', (await mergeBtn.textContent()).includes('一键审查、测试并合并'))
+  check('2 秒后未点击自动还原', (await mergeBtn.textContent()).includes('一键合并'))
   check('超时未触发合并', saved.merges.length === mergesBefore)
   await mergeBtn.click(); await mergeBtn.click()
   await page.waitForTimeout(300)

@@ -2,7 +2,7 @@ const { chromium } = require('playwright-core')
 const { findChromium, shot, BASE_URL } = require('./helpers.cjs')
 const PROJECTS = [{ id: 1, name: 'proj-one', repository: 'owner/proj-one', token: 't', openPrs: 1 }]
 const mk = (n, dir = 'src/module') => ({ filename: `${dir}/file${n}.ts`, patch: `+++ b/x\n@@ -1,3 +1,6 @@\n-a\n-b\n-c\n+new${n}-1\n+new${n}-2\n+new${n}-3\n+new${n}-4\n+new${n}-5\n+new${n}-6` })
-const FILES = [mk(1), mk(2), mk(3), mk(4, 'docs/guide'), mk(5), mk(6)]
+const FILES = [mk(1), mk(2), mk(3), mk(4, 'docs/guide'), mk(5), mk(6), { filename: 'db/migrate.sql', patch: '+++ b/db/migrate.sql\n@@ -1,1 +1,2 @@\n-old\n+ALTER TABLE users ADD COLUMN x;' }]
 let failures = 0
 
 function check(name, cond) {
@@ -43,32 +43,40 @@ function check(name, cond) {
 
   // 目录树侧栏
   const names = async () => page.locator('.file-item .file-name').allTextContents()
-  check('目录排在文件前', (await names())[0] === 'docs' && (await names())[3] === 'src' && (await names())[4] === 'module')
-  check('树共 10 行', (await names()).length === 10)
+  check('目录排在文件前', (await names())[0] === 'db' && (await names())[1] === 'migrate.sql' && (await names())[2] === 'docs' && (await names())[5] === 'src' && (await names())[6] === 'module')
+  check('树共 12 行(5 目录 + 7 文件)', (await names()).length === 12)
   check('目录聚合统计 src +30', (await page.locator('.file-item.dir', { hasText: 'src' }).locator('.stat-added').textContent()) === '+30')
 
   const srcRow = page.locator('.file-item.dir', { hasText: 'src' })
   await srcRow.click()
   await page.waitForTimeout(150)
-  check('折叠 src 后 4 行', (await names()).length === 4)
+  check('折叠 src 后 6 行', (await names()).length === 6)
   await srcRow.click()
   await page.waitForTimeout(150)
-  check('重新展开恢复 10 行', (await names()).length === 10)
+  check('重新展开恢复 12 行', (await names()).length === 12)
 
   await page.locator('.file-item', { hasText: 'file6.ts' }).last().click()
   await page.waitForTimeout(500)
+  console.log('active 行实际内容:', JSON.stringify(await page.locator('.file-item.active .file-name').allTextContents()), '| 行数:', await page.locator('.file-item.active').count())
   check('点击文件行高亮', (await page.locator('.file-item.active .file-name').textContent()) === 'file6.ts')
 
   // 工具栏
-  check('工具栏显示 6 个文件', (await page.locator('.files-toolbar span').first().textContent()) === '6 个文件')
-  check('工具栏总统计 +36/-18', (await page.locator('.toolbar-stats').textContent()) === '+36-18')
-  check('每卡片有复制按钮', (await page.locator('.copy-btn:not(.full-toggle)').count()) === 6)
-  check('默认全展开 6 个 diff', (await page.locator('.file-diff').count()) === 6)
+  check('工具栏显示 7 个文件', (await page.locator('.files-toolbar span').first().textContent()) === '7 个文件')
+  check('工具栏总统计 +37/-19', (await page.locator('.toolbar-stats').textContent()) === '+37-19')
+  check('每卡片有复制按钮', (await page.locator('.copy-btn:not(.full-toggle)').count()) === 7)
+  check('默认全展开 7 个 diff', (await page.locator('.file-diff').count()) === 7)
 
   await page.locator('.files-toolbar button', { hasText: '全部收起' }).click()
   check('全部收起生效', (await page.locator('.file-diff').count()) === 0)
   await page.locator('.files-toolbar button', { hasText: '全部展开' }).click()
-  check('全部展开生效', (await page.locator('.file-diff').count()) === 6)
+  check('全部展开生效', (await page.locator('.file-diff').count()) === 7)
+
+  // SQL 文件高亮
+  const sqlRow = page.locator('.file-item.sql', { hasText: 'migrate.sql' })
+  check('侧栏 SQL 文件琥珀色标注', (await sqlRow.count()) === 1 && (await sqlRow.evaluate((el) => getComputedStyle(el.querySelector('.file-name')).color)) === 'rgb(180, 83, 9)')
+  check('侧栏 SQL 标签存在', (await sqlRow.locator('.sql-tag').textContent()) === 'SQL')
+  const sqlCard = page.locator('.file-card-header.sql-card', { hasText: 'migrate.sql' })
+  check('文件卡片 SQL 浅黄底标注', (await sqlCard.count()) === 1 && (await sqlCard.evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(255, 248, 197)')
 
   // 文件搜索
   await page.locator('.file-search').fill('file4')
@@ -77,7 +85,7 @@ function check(name, cond) {
   check('搜索联动侧栏', JSON.stringify(await names()) === JSON.stringify(['docs', 'guide', 'file4.ts']))
   await page.locator('.file-search').fill('')
   await page.waitForTimeout(100)
-  check('清空恢复', (await page.locator('.file-card:visible').count()) === 6)
+  check('清空恢复', (await page.locator('.file-card:visible').count()) === 7)
 
   // 拖拽调宽
   const asideWidthBefore = (await page.locator('.file-list').boundingBox()).width
@@ -97,7 +105,7 @@ function check(name, cond) {
   check('完整文件内容已加载', (await page.locator('.full-file').first().textContent()).includes('line2'))
   await page.locator('.copy-btn.full-toggle').first().click()
   await page.waitForTimeout(200)
-  check('切回 diff 视图', (await page.locator('.full-file').count()) === 0 && (await page.locator('.file-diff').count()) === 6)
+  check('切回 diff 视图', (await page.locator('.full-file').count()) === 0 && (await page.locator('.file-diff').count()) === 7)
 
   // 侧栏切换提交记录
   check('侧栏默认文件页签', (await page.locator('.file-list-scroll .file-item').count()) > 0)
@@ -119,7 +127,7 @@ function check(name, cond) {
   // 再点同一条 → 返回 PR 文件
   await page.locator('.commit-item').first().click()
   await page.waitForTimeout(300)
-  check('再次点击返回 PR 文件', (await page.locator('.commit-viewing').count()) === 0 && (await page.locator('.file-card').count()) === 6)
+  check('再次点击返回 PR 文件', (await page.locator('.commit-viewing').count()) === 0 && (await page.locator('.file-card').count()) === 7)
 
   // 切换到另一条提交
   await page.locator('.commit-item').nth(1).click()
@@ -129,11 +137,11 @@ function check(name, cond) {
   // 返回按钮
   await page.locator('.commit-back').click()
   await page.waitForTimeout(200)
-  check('返回按钮恢复 PR 文件', (await page.locator('.file-card').count()) === 6)
+  check('返回按钮恢复 PR 文件', (await page.locator('.file-card').count()) === 7)
 
   await page.locator('.sidebar-tabs button', { hasText: '文件' }).click()
   await page.waitForTimeout(100)
-  check('切回文件页签恢复树', (await page.locator('.file-list-scroll .file-item').count()) === 10)
+  check('切回文件页签恢复树', (await page.locator('.file-list-scroll .file-item').count()) === 12)
   await page.screenshot({ path: shot('pr-files.png') })
   await browser.close()
   console.log(failures ? `\n${failures} failed` : '\nALL PASS')

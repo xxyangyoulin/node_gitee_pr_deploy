@@ -228,3 +228,9 @@ button:disabled { cursor: not-allowed; }
 .loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
 .loading-state p { margin: 0; color: #57606a; }
 .loading-anim { width: 88px; height: 88px; }
+.file-item.sql .file-name { color: #b45309; font-weight: 600; }
+.file-item.sql .sql-tag, .file-card-header .sql-tag { flex: 0 0 auto; padding: 1px 6px; border-radius: 4px; background: #fff8c5; border: 1px solid #d4a72c; color: #7d4e00; font-size: 10px; font-weight: 600; }
+.file-card-header.sql-card { background: #fff8c5; }
+.file-card-header.sql-card:hover { background: #fdf0b8; }
+.file-card-header.sql-card .file-name { color: #b45309; }
+.file-card-header .sql-tag { margin-left: -4px; }
