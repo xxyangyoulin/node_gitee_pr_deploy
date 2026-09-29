@@ -54,8 +54,9 @@ button { cursor: pointer; }
 .copy-btn { flex: 0 0 auto; padding: 3px 8px; border: 1px solid #d0d7de; border-radius: 5px; background: #fff; font-size: 12px; color: #57606a; }
 .copy-btn:hover { color: #0969da; border-color: #0969da; }
 .copy-btn.full-toggle.active { color: #fff; background: #0969da; border-color: #0969da; }
-.one-click-modal { width: 560px; }
+.one-click-modal { width: 720px; }
 .one-click-modal h2 { margin-top: 0; }
+.one-click-modal .deploy-output { height: 280px; margin: 0 -28px 14px; padding: 12px 0; border-radius: 0; }
 .progress-steps { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 9px; }
 .progress-steps li { display: flex; align-items: center; gap: 9px; color: #8c959f; }
 .progress-steps li.done { color: #1a7f37; }
