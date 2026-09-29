@@ -117,6 +117,15 @@ function check(name, cond) {
   check('提交时间展示', (await page.locator('.commit-item').first().locator('.history-time').textContent()) === '2026-09-27 10:00')
   check('文件树随切换隐藏', (await page.locator('.file-list-scroll .file-item').count()) === 0)
 
+  // SQL pop 提示与定位
+  const sqlPop = page.locator('.sql-pop')
+  check('提交页签显示有 SQL 变动 pop', (await sqlPop.count()) === 1 && (await sqlPop.textContent()).includes('有 SQL 变动') && (await sqlPop.textContent()).includes('migrate.sql'))
+  await sqlPop.click()
+  await page.waitForTimeout(300)
+  check('点击 pop 定位第一个 SQL 文件', (await page.locator('.sidebar-tabs button.files-tab.active').count()) === 1 && (await page.locator('.file-item.active .file-name').textContent()) === 'migrate.sql')
+  await page.locator('.sidebar-tabs button', { hasText: '提交记录' }).click()
+  await page.waitForTimeout(100)
+
   // 点击提交 → 文件区展示该提交变动
   await page.locator('.commit-item').first().click()
   await page.waitForTimeout(300)
