@@ -70,7 +70,7 @@ function check(name, cond) {
 
   await page.locator('.page-heading button', { hasText: '添加配置' }).click()
   const modal = page.locator('.modal')
-  check('弹窗默认选中未配置项目', (await modal.locator('select').inputValue()) === '2')
+  check('弹窗默认选中未配置项目', (await modal.locator('.dropdown-toggle').textContent()).includes('proj-two'))
   const hostInput = modal.locator('input[placeholder="example.com"]')
   await hostInput.click()
   const hostMenu = modal.locator('.combo-menu').first()

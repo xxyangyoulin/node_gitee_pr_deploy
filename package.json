@@ -8,7 +8,6 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "build:electron": "tsc -p electron/tsconfig.json",
     "build:server": "tsc -p server/tsconfig.json",
     "check": "npm run build && npm run build:server",
     "test:ui": "node tests/run-all.cjs",
@@ -22,7 +21,6 @@
   "devDependencies": {
     "@types/node": "^26.6.2",
     "@vitejs/plugin-vue": "^5.2.3",
-    "electron": "^36.4.0",
     "playwright-core": "^1.63.0",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",

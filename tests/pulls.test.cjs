@@ -68,7 +68,6 @@ function check(name, cond) {
     if (path === '/api/gitee/pull-logs') return route.fulfill({ json: [] })
     if (path === '/api/gitee/pull-files') return route.fulfill({ json: [] })
     if (path === '/api/deployment/configs') return route.fulfill({ json: [{ projectId: 1, projectName: 'proj-one', host: 'a.com', username: 'deploy', remotePath: '/srv/one', command: './deploy.sh' }, { projectId: 2, projectName: 'proj-two', host: 'a.com', username: 'deploy', remotePath: '/srv/two', command: './deploy.sh' }] })
-    if (path === '/api/deployment/run') { saved.runs.push(req.postDataJSON().projectId); return route.fulfill({ json: 'deploy out\n[部署完成]' }) }
     return route.fulfill({ json: {} })
   })
 
@@ -82,17 +81,20 @@ function check(name, cond) {
   check('列表显示创建时间', (await page.locator('.pr-item').first().locator('.pr-time').textContent()) === '2026-09-28 09:00')
   await page.screenshot({ path: shot('pulls-aggregate.png') })
 
-  await page.locator('.filter-select').selectOption('2')
+  await page.locator('.filter-select .dropdown-toggle').click()
+  await page.locator('.dropdown-menu button', { hasText: 'proj-two' }).click()
   await page.waitForTimeout(100)
   check('筛选后仅显示该项目 PR', (await page.locator('.pr-item').count()) === 3)
-  await page.locator('.filter-select').selectOption('all')
+  await page.locator('.filter-select .dropdown-toggle').click()
+  await page.locator('.dropdown-menu button', { hasText: '全部项目' }).click()
   await page.waitForTimeout(100)
 
   // 选中 非 dock→dock 的 PR:显示一键 master
   await page.locator('.pr-item').first().click()
   await page.waitForTimeout(400)
   check('选中行高亮', (await page.locator('.pr-item.selected').count()) === 1)
-  check('标题栏显示已选 PR', (await page.locator('.page-heading p').first().textContent()).includes('已选 proj-two #13'))
+  check('标题栏显示已选 PR', (await page.locator('.page-heading .selected-project-badge').textContent()) === 'proj-two' && (await page.locator('.page-heading .selected-pr-ref').textContent()).includes('#13'))
+  check('标题栏项目徽章为紫色高亮', (await page.locator('.page-heading .selected-project-badge').evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(251, 239, 255)')
   const oneClickBtn = page.locator('.heading-actions button', { hasText: '一键 master' })
   check('非 dock→dock 显示一键 master', (await oneClickBtn.count()) === 1)
 
