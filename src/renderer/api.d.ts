@@ -7,12 +7,12 @@ interface Window {
     getSettings(): Promise<{ prHead: string; prBase: string; mergeMethod: string }>
     saveSettings(input: { prHead: string; prBase: string; mergeMethod: string }): Promise<{ prHead: string; prBase: string; mergeMethod: string }>
     getMeta(): Promise<{ version: string; dataPath: string }>
-    listDeploymentConfigs(): Promise<Array<{ projectId: number; projectName: string; host: string; username: string; remotePath: string; command: string }>>
-    deleteDeploymentConfig(projectId: number): Promise<unknown>
-    saveDeploymentConfig(input: { projectId: number; host: string; username: string; remotePath: string; command: string }): Promise<unknown>
+    listDeploymentConfigs(): Promise<Array<{ id: number; projectId: number; projectName: string; name: string; host: string; username: string; remotePath: string; command: string; position: number }>>
+    saveDeploymentTarget(input: { id?: number; projectId: number; name: string; host: string; username: string; remotePath: string; command: string }): Promise<unknown>
+    deleteDeploymentTarget(id: number): Promise<unknown>
+    runDeployment(targetId: number, onChunk?: (text: string) => void): Promise<string>
     listDeploymentServers(): Promise<Array<{ host: string; username: string }>>
-    runDeployment(projectId: number, onChunk?: (text: string) => void): Promise<string>
-    listDeploymentLogs(query?: { projectId?: number; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; host: string; output: string; success: number; createdAt: string }>>
+    listDeploymentLogs(query?: { projectId?: number; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; targetName: string; host: string; output: string; success: number; createdAt: string }>>
     listPullRequests(input: { repository: string; token: string }): Promise<any[]>
     pullRequestDetail(input: { repository: string; token: string; number: number }): Promise<any>
     pullRequestLogs(input: { repository: string; token: string; number: number }): Promise<any[]>

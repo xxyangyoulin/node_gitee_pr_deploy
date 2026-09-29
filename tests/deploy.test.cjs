@@ -8,12 +8,12 @@ const SERVERS = [
   { host: 'a.com', username: 'deploy' },
   { host: 'b.org', username: 'root' },
 ]
-const configs = [
-  { projectId: 1, projectName: 'proj-one', host: 'a.com', username: 'deploy', remotePath: '/srv/one', command: './deploy.sh' },
-  { projectId: 2, projectName: 'proj-two', host: '', username: '', remotePath: '', command: '' },
+const targets = [
+  { id: 11, projectId: 1, projectName: 'proj-one', name: 'web-1', host: 'a.com', username: 'deploy', remotePath: '/srv/one', command: './deploy.sh', position: 0 },
+  { id: 12, projectId: 1, projectName: 'proj-one', name: 'web-2', host: 'b.org', username: 'root', remotePath: '/srv/two', command: './ship.sh', position: 1 },
 ]
-const deployLogs = [{ id: 1, projectId: 1, projectName: 'proj-one', host: 'deploy@a.com', output: '历史输出', success: 1, createdAt: '2026-09-01 10:00:00' }]
-const saved = { configs: [], deletes: [] }
+const deployLogs = [{ id: 1, projectId: 1, projectName: 'proj-one', targetName: 'web-1', host: 'deploy@a.com', output: '历史输出', success: 1, createdAt: '2026-09-01 10:00:00' }]
+const saved = { targets: [], deletes: [], runs: [] }
 let failures = 0
 
 function check(name, cond) {
@@ -29,25 +29,30 @@ function check(name, cond) {
     const req = route.request()
     const url = new URL(req.url())
     if (url.pathname === '/api/projects') return route.fulfill({ json: PROJECTS })
-    if (url.pathname === '/api/deployment/configs') return route.fulfill({ json: configs.map((row) => ({ ...row })) })
-    if (url.pathname === '/api/deployment/servers') return route.fulfill({ json: SERVERS })
-    if (url.pathname === '/api/deployment/config' && req.method() === 'POST') {
+    if (url.pathname === '/api/deployment/targets' && req.method() === 'GET') return route.fulfill({ json: targets.map((row) => ({ ...row })) })
+    if (url.pathname === '/api/deployment/targets' && req.method() === 'POST') {
       const input = req.postDataJSON()
-      saved.configs.push(input)
-      const row = configs.find((item) => item.projectId === input.projectId)
-      if (row) Object.assign(row, { host: input.host, username: input.username, remotePath: input.remotePath, command: input.command })
-      return route.fulfill({ json: input })
+      saved.targets.push(input)
+      if (input.id) {
+        const row = targets.find((item) => item.id === input.id)
+        if (row) Object.assign(row, { name: input.name, host: input.host, username: input.username, remotePath: input.remotePath, command: input.command })
+      } else {
+        targets.push({ id: 99, projectId: input.projectId, projectName: input.projectId === 1 ? 'proj-one' : 'proj-two', name: input.name, host: input.host, username: input.username, remotePath: input.remotePath, command: input.command, position: 0 })
+      }
+      return route.fulfill({ json: { ...input } })
     }
-    if (url.pathname === '/api/deployment/config' && req.method() === 'DELETE') {
-      const projectId = Number(url.searchParams.get('projectId'))
-      saved.deletes.push(projectId)
-      const row = configs.find((item) => item.projectId === projectId)
-      if (row) Object.assign(row, { host: '', username: '', remotePath: '', command: '' })
+    if (url.pathname === '/api/deployment/targets/delete' && req.method() === 'POST') {
+      const input = req.postDataJSON()
+      saved.deletes.push(input.id)
+      const index = targets.findIndex((item) => item.id === input.id)
+      if (index >= 0) targets.splice(index, 1)
       return route.fulfill({ json: {} })
     }
+    if (url.pathname === '/api/deployment/servers') return route.fulfill({ json: SERVERS })
     if (url.pathname === '/api/deployment/run') {
-      const projectId = req.postDataJSON().projectId
-      deployLogs.unshift({ id: deployLogs.length + 1, projectId, projectName: projectId === 1 ? 'proj-one' : 'proj-two', host: 'deploy@a.com', output: 'step1\n[部署完成]', success: 1, createdAt: '2026-09-28 12:00:00' })
+      const targetId = req.postDataJSON().targetId
+      saved.runs.push(targetId)
+      deployLogs.unshift({ id: deployLogs.length + 1, projectId: 1, projectName: 'proj-one', targetName: targetId === 11 ? 'web-1' : 'web-2', host: 'deploy@a.com', output: 'step1\n[部署完成]', success: 1, createdAt: '2026-09-28 12:00:00' })
       return route.fulfill({ json: 'step1\n[部署完成]' })
     }
     if (url.pathname === '/api/deployment/logs') {
@@ -61,55 +66,59 @@ function check(name, cond) {
   await page.goto(`${BASE_URL}/#/deployments`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(300)
 
-  check('表格展示全部项目(2 行)', (await page.locator('.deploy-table tbody tr').count()) === 2)
-  check('已配置项目显示地址', (await page.locator('.deploy-table tbody tr').first().textContent()).includes('a.com'))
-  check('未配置项目显示未配置', (await page.locator('.deploy-table tbody tr').last().textContent()).includes('未配置'))
-  check('未配置项目禁用执行部署', await page.locator('.deploy-table .row-actions button.primary').last().isDisabled())
-  check('部署历史初始 1 条', (await page.locator('.history-row').count()) === 1)
-  await page.screenshot({ path: shot('deploy-table.png') })
+  // 分组展示:2 个项目分组,proj-one 2 个目标,proj-two 未配置
+  check('分组展示 2 个项目', (await page.locator('.deploy-group').count()) === 2)
+  check('proj-one 分组含 2 个目标行', (await page.locator('.deploy-group').first().locator('.deploy-target-row').count()) === 2)
+  check('proj-two 显示未配置', (await page.locator('.deploy-group').last().textContent()).includes('未配置目标'))
+  check('目标行显示别名与主机', (await page.locator('.deploy-target-row').first().textContent()).includes('web-1') && (await page.locator('.deploy-target-row').first().textContent()).includes('deploy@a.com'))
+  await page.screenshot({ path: shot('deploy-groups.png') })
 
-  await page.locator('.page-heading button', { hasText: '添加配置' }).click()
+  // 添加目标(proj-two)
+  await page.locator('.deploy-group').last().locator('button', { hasText: '添加目标' }).click()
   const modal = page.locator('.modal')
-  check('弹窗默认选中未配置项目', (await modal.locator('.dropdown-toggle').textContent()).includes('proj-two'))
+  check('弹窗项目固定为 proj-two', (await modal.locator('input').first().inputValue()) === 'proj-two')
+  await modal.locator('input').nth(1).fill('db-1')
   const hostInput = modal.locator('input[placeholder="example.com"]')
   await hostInput.click()
   const hostMenu = modal.locator('.combo-menu').first()
-  check('弹窗内聚焦地址出现建议', await hostMenu.isVisible())
-  check('建议去重 2 项', (await hostMenu.locator('button').count()) === 2)
+  check('聚焦地址出现建议', await hostMenu.isVisible())
   await hostMenu.locator('button', { hasText: 'a.com' }).dispatchEvent('mousedown')
   check('选中地址带出用户', (await modal.locator('input[placeholder="deploy"]').inputValue()) === 'deploy')
-  await modal.locator('input[placeholder="/srv/app"]').fill('/srv/two')
+  await modal.locator('input[placeholder="/srv/app"]').fill('/srv/db')
   await modal.locator('input[placeholder="git pull && ./deploy.sh"]').fill('./ship.sh')
   await modal.locator('button[type=submit]').click()
   await page.waitForTimeout(300)
-  check('保存请求写入项目 2', saved.configs.at(-1)?.projectId === 2 && saved.configs.at(-1)?.host === 'a.com')
-  check('表格刷新显示新配置', (await page.locator('.deploy-table tbody tr').last().textContent()).includes('/srv/two'))
+  check('保存请求写入项目 2', saved.targets.at(-1)?.projectId === 2 && saved.targets.at(-1)?.name === 'db-1')
+  check('proj-two 分组出现新目标', (await page.locator('.deploy-group').last().locator('.deploy-target-row').count()) === 1)
 
-  await page.locator('.deploy-table tbody tr').last().locator('button', { hasText: '编辑' }).click()
-  check('编辑弹窗预填', (await modal.locator('input[placeholder="example.com"]').inputValue()) === 'a.com')
-  await modal.locator('input[placeholder="example.com"]').fill('c.net')
+  // 编辑目标 web-2
+  await page.locator('.deploy-group').first().locator('.deploy-target-row', { hasText: 'web-2' }).locator('button', { hasText: '编辑' }).click()
+  check('编辑弹窗预填别名', (await modal.locator('input').nth(1).inputValue()) === 'web-2')
+  check('编辑弹窗预填主机', (await modal.locator('input[placeholder="example.com"]').inputValue()) === 'b.org')
+  await modal.locator('input').nth(1).fill('web-2b')
   await modal.locator('button[type=submit]').click()
   await page.waitForTimeout(300)
-  check('编辑保存到项目 2', saved.configs.at(-1)?.projectId === 2 && saved.configs.at(-1)?.host === 'c.net')
+  check('编辑保存到目标 12', saved.targets.at(-1)?.id === 12 && saved.targets.at(-1)?.name === 'web-2b')
+  check('列表显示新别名', (await page.locator('.deploy-target-row', { hasText: 'web-2b' }).count()) === 1)
 
-  await page.locator('.deploy-table tbody tr').last().locator('button', { hasText: '删除' }).click()
+  // 删除目标
+  await page.locator('.deploy-target-row', { hasText: 'web-2b' }).locator('button', { hasText: '删除' }).click()
   await page.locator('.confirm-modal button', { hasText: '确认' }).click()
   await page.waitForTimeout(300)
-  check('删除请求携带项目 2', saved.deletes.at(-1) === 2)
-  check('删除后恢复未配置', (await page.locator('.deploy-table tbody tr').last().textContent()).includes('未配置'))
+  check('删除请求携带目标 12', saved.deletes.at(-1) === 12)
+  check('删除后 proj-one 仅剩 1 行', (await page.locator('.deploy-group').first().locator('.deploy-target-row').count()) === 1)
 
-  await page.locator('.deploy-table tbody tr').first().locator('button', { hasText: '执行部署' }).click()
+  // 单台执行 + 日志
+  await page.locator('.deploy-target-row').first().locator('button', { hasText: '执行' }).click()
   await page.waitForTimeout(500)
-  check('日志区显示项目名', (await page.locator('.deploy-log-section h2').textContent()).includes('部署日志 · proj-one'))
-  check('日志包含输出与完成标记', (await page.locator('.deploy-output').textContent()).includes('[部署完成]'))
+  check('日志区显示目标名', (await page.locator('.deploy-log-section h2').textContent()).includes('web-1'))
+  check('日志包含完成标记', (await page.locator('.deploy-output').textContent()).includes('[部署完成]'))
 
-  // 执行后历史新增,点击历史回看日志
-  await page.locator('.deploy-table tbody tr').first().locator('button', { hasText: '执行部署' }).click()
+  // 再次执行(全部执行按钮,组内 1 台)
+  await page.locator('.deploy-group').first().locator('button', { hasText: '全部执行' }).click()
   await page.waitForTimeout(500)
-  check('部署后历史新增为 3 条', (await page.locator('.history-row').count()) === 3)
-  check('最新历史排在最前', (await page.locator('.history-row').first().textContent()).includes('2026-09-28 12:00:00'))
-  await page.locator('.history-row').last().click()
-  check('点击历史回看旧日志', (await page.locator('.deploy-output').textContent()).includes('历史输出'))
+  check('全部执行日志含分段标记', (await page.locator('.deploy-output').textContent()).includes('==> [web-1]'))
+  check('部署历史新增到 3 条', (await page.locator('.history-row').count()) === 3)
   await page.screenshot({ path: shot('deploy-run.png') })
 
   await browser.close()

@@ -6,7 +6,8 @@ import DropdownSelect from './DropdownSelect.vue'
 
 type Project = { id: number; name: string; repository: string; token: string; openPrs: number }
 type PullItem = { project: Project; pull: any }
-type DeploymentRow = { projectId: number; projectName: string; host: string; username: string; remotePath: string; command: string }
+type DeploymentRow = { id: number; projectId: number; projectName: string; name: string; host: string; username: string; remotePath: string; command: string; position: number }
+type DeployGroup = { project: Project; targets: DeploymentRow[] }
 
 const projects = ref<Project[]>([])
 const pageList = [
@@ -45,6 +46,7 @@ const commits = ref<any[]>([])
 const sidebarTab = ref<'files' | 'commits'>('files')
 const prFilesCache = ref<any[]>([])
 const viewingCommit = ref<any | null>(null)
+const commitLoading = ref(false)
 const errorMessage = ref('')
 const mergeMessage = ref('')
 const reviewPassed = ref(false)
@@ -65,8 +67,9 @@ type OneClickRun = {
   created2: boolean
   merged2: boolean
   deployed: boolean
+  deployedTargetIds: number[]
   lastDeploy: { createdAt: string; success: number } | null
-  deployTarget: { host: string; username: string; remotePath: string } | null
+  deployTarget: { name: string; host: string; username: string; remotePath: string } | null
   log: string
   failed: boolean
   running: boolean
@@ -128,10 +131,14 @@ const creatingPr = ref(false)
 const deploymentRows = ref<DeploymentRow[]>([])
 const loadingDeployments = ref(false)
 const deploymentServers = ref<{ host: string; username: string }[]>([])
-const deployHistory = ref<Array<{ id: number; projectId: number; projectName: string; host: string; output: string; success: number; createdAt: string }>>([])
+const deploymentGroups = computed<DeployGroup[]>(() => projects.value.map((project) => ({
+  project,
+  targets: deploymentRows.value.filter((row) => row.projectId === project.id).sort((a, b) => a.position - b.position || a.id - b.id),
+})))
+const deployHistory = ref<Array<{ id: number; projectId: number; projectName: string; targetName: string; host: string; output: string; success: number; createdAt: string }>>([])
 const activeHistoryId = ref(0)
 const configModal = ref(false)
-const configForm = ref({ projectId: 0, projectName: '', isNew: true, host: '', username: '', remotePath: '', command: '' })
+const configForm = ref({ id: 0, projectId: 0, projectName: '', name: '', host: '', username: '', remotePath: '', command: '' })
 const configFormError = ref('')
 const savingConfig = ref(false)
 const showHostSuggestions = ref(false)
@@ -456,41 +463,41 @@ function pickUser(username: string) {
   showUserSuggestions.value = false
 }
 
-function openAddConfig() {
-  const configured = new Set(deploymentRows.value.filter((row) => row.host).map((row) => row.projectId))
-  const free = projects.value.find((project) => !configured.has(project.id)) ?? projects.value[0]
-  configForm.value = { projectId: free?.id ?? 0, projectName: free?.name ?? '', isNew: true, host: '', username: '', remotePath: '', command: '' }
+function openAddTarget(group: DeployGroup) {
+  configForm.value = { id: 0, projectId: group.project.id, projectName: group.project.name, name: '', host: '', username: '', remotePath: '', command: '' }
   configFormError.value = ''
   configModal.value = true
 }
 
-function openEditConfig(row: DeploymentRow) {
-  configForm.value = { projectId: row.projectId, projectName: row.projectName, isNew: false, host: row.host, username: row.username, remotePath: row.remotePath, command: row.command }
+function openEditTarget(row: DeploymentRow) {
+  configForm.value = { id: row.id, projectId: row.projectId, projectName: row.projectName, name: row.name, host: row.host, username: row.username, remotePath: row.remotePath, command: row.command }
   configFormError.value = ''
   configModal.value = true
 }
 
-async function saveConfig() {
+async function saveTarget() {
   if (!configForm.value.projectId) { configFormError.value = '请选择项目'; return }
   savingConfig.value = true
   try {
-    await window.releaseConsole.saveDeploymentConfig({
+    await window.releaseConsole.saveDeploymentTarget({
+      id: configForm.value.id || undefined,
       projectId: configForm.value.projectId,
+      name: configForm.value.name.trim(),
       host: configForm.value.host.trim(),
       username: configForm.value.username.trim(),
       remotePath: configForm.value.remotePath.trim(),
       command: configForm.value.command.trim(),
     })
     configModal.value = false
-    mergeMessage.value = '部署配置已保存'
+    mergeMessage.value = '部署目标已保存'
     await loadDeploymentRows()
   } catch (error) { configFormError.value = error instanceof Error ? error.message : '保存配置失败' } finally { savingConfig.value = false }
 }
 
-function askDeleteConfig(row: DeploymentRow) {
-  askConfirmation(`确认删除「${row.projectName}」的部署配置？`, () => { void (async () => {
-    await window.releaseConsole.deleteDeploymentConfig(row.projectId)
-    mergeMessage.value = '部署配置已删除'
+function askDeleteTarget(row: DeploymentRow) {
+  askConfirmation(`确认删除「${row.projectName}」的目标「${row.name || row.host}」？`, () => { void (async () => {
+    await window.releaseConsole.deleteDeploymentTarget(row.id)
+    mergeMessage.value = '部署目标已删除'
     await loadDeploymentRows()
   })() })
 }
@@ -499,17 +506,46 @@ function configComplete(row: DeploymentRow) {
   return !!(row.host && row.username && row.remotePath && row.command)
 }
 
-async function runProjectDeployment(row: DeploymentRow) {
+async function streamTarget(target: DeploymentRow, onChunk: (text: string) => void) {
+  return window.releaseConsole.runDeployment(target.id, onChunk)
+}
+
+async function runTargetDeployment(row: DeploymentRow) {
   if (!configComplete(row) || deployLog.value.running) return
-  deployLog.value = { projectId: row.projectId, projectName: row.projectName, output: '', running: true }
+  deployLog.value = { projectId: row.projectId, projectName: `${row.projectName} · ${row.name || row.host}`, output: '', running: true }
   try {
-    deployLog.value.output = await window.releaseConsole.runDeployment(row.projectId, (text) => {
+    deployLog.value.output = await streamTarget(row, (text) => {
       deployLog.value.output += text
       nextTick(() => deployOutputEl.value?.scrollTo({ top: deployOutputEl.value.scrollHeight }))
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : '部署失败'
     deployLog.value.output += (deployLog.value.output ? '\n' : '') + message
+  } finally {
+    deployLog.value.running = false
+    loadDeployHistory()
+  }
+}
+
+async function runGroupDeployment(group: DeployGroup) {
+  const targets = group.targets.filter(configComplete)
+  if (!targets.length || deployLog.value.running) return
+  deployLog.value = { projectId: group.project.id, projectName: group.project.name, output: '', running: true }
+  try {
+    for (const target of targets) {
+      deployLog.value.output += `\n==> [${target.name || target.host}] ${target.username}@${target.host}\n`
+      try {
+        await streamTarget(target, (text) => {
+          deployLog.value.output += text
+          nextTick(() => deployOutputEl.value?.scrollTo({ top: deployOutputEl.value.scrollHeight }))
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '部署失败'
+        deployLog.value.output += `\n[部署失败] ${target.name || target.host}：${message}\n[后续目标已跳过]`
+        return
+      }
+    }
+    deployLog.value.output += '\n[全部部署完成]'
   } finally {
     deployLog.value.running = false
     loadDeployHistory()
@@ -644,11 +680,11 @@ function requestOneClick(kind: 'master' | 'deploy') {
   resetOneClickConfirm()
   if (kind === 'deploy' && !oneClickTarget.value && isDockToMaster.value) {
     const target = selectedPull.value!
-    oneClickRun.value = { project: target.project, pull: target.pull, title: '', created: null, withDeploy: true, direct: true, merged1: false, created2: false, merged2: false, deployed: false, lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
+    oneClickRun.value = { project: target.project, pull: target.pull, title: '', created: null, withDeploy: true, direct: true, merged1: false, created2: false, merged2: false, deployed: false, deployedTargetIds: [] as number[], lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
   } else {
     const target = oneClickTarget.value
     if (!target) return
-    oneClickRun.value = { project: target.project, pull: target.pull, title: String(target.pull.title ?? ''), created: null, withDeploy: kind === 'deploy', direct: false, merged1: false, created2: false, merged2: false, deployed: false, lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
+    oneClickRun.value = { project: target.project, pull: target.pull, title: String(target.pull.title ?? ''), created: null, withDeploy: kind === 'deploy', direct: false, merged1: false, created2: false, merged2: false, deployed: false, deployedTargetIds: [] as number[], lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
   }
   void runOneClick()
 }
@@ -675,22 +711,28 @@ async function runDeployStage(run: OneClickRun) {
     const logs = await window.releaseConsole.listDeploymentLogs({ projectId: run.project.id, limit: 1 })
     run.lastDeploy = logs[0] ? { createdAt: logs[0].createdAt, success: logs[0].success } : null
   } catch { }
+  console.log('[runDeployStage] project:', run.project.id, run.project.name, '| rows:', deploymentRows.value.length)
   if (!deploymentRows.value.length) { try { await loadDeploymentRows() } catch { } }
-  const row = deploymentRows.value.find((item) => item.projectId === run.project.id)
-  if (!row || !configComplete(row)) throw new Error(`项目 ${run.project.name} 未配置部署，无法执行部署`)
-  run.deployTarget = { host: row.host, username: row.username, remotePath: row.remotePath }
-  deployLog.value = { projectId: row.projectId, projectName: row.projectName, output: '', running: true }
-  try {
-    deployLog.value.output = await window.releaseConsole.runDeployment(row.projectId, (text) => {
-      deployLog.value.output += text
-      run.log += text
-      nextTick(() => {
-        modalLogEl.value?.scrollTo({ top: modalLogEl.value.scrollHeight })
-        deployOutputEl.value?.scrollTo({ top: deployOutputEl.value.scrollHeight })
+  console.log('[runDeployStage] rows after load:', deploymentRows.value.map((r) => `${r.projectId}:${r.name}`).join(','))
+  const targets = deploymentRows.value
+    .filter((row) => row.projectId === run.project.id && configComplete(row))
+    .sort((a, b) => a.position - b.position || a.id - b.id)
+  if (!targets.length) throw new Error(`项目 ${run.project.name} 未配置部署目标，无法执行部署`)
+  for (const target of targets) {
+    if (run.deployedTargetIds.includes(target.id)) continue
+    run.deployTarget = { name: target.name || target.host, host: target.host, username: target.username, remotePath: target.remotePath }
+    run.log += `\n==> [${target.name || target.host}] ${target.username}@${target.host}\n`
+    try {
+      await window.releaseConsole.runDeployment(target.id, (text) => {
+        run.log += text
+        nextTick(() => modalLogEl.value?.scrollTo({ top: modalLogEl.value.scrollHeight }))
       })
-    })
-  } finally {
-    deployLog.value.running = false
+      run.deployedTargetIds.push(target.id)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '部署失败'
+      run.log += `\n[部署失败] ${target.name || target.host}：${message}\n[后续目标已跳过，可重试继续]`
+      throw new Error(`目标 [${target.name || target.host}] 部署失败`)
+    }
   }
 }
 
@@ -829,7 +871,7 @@ async function selectCommit(commit: any) {
   if (viewingCommit.value?.sha === commit.sha) { exitCommitView(); return }
   const target = selectedPull.value
   if (!target) return
-  loadingFiles.value = true
+  commitLoading.value = true
   errorMessage.value = ''
   try {
     const detail = await window.releaseConsole.commitDetail({ repository: target.project.repository, token: target.project.token, sha: String(commit.sha) })
@@ -838,8 +880,7 @@ async function selectCommit(commit: any) {
     expandedFiles.value = {}
     expandedDirs.value = {}
     activeFileIndex.value = 0
-    fileQuery.value = ''
-  } catch (error) { errorMessage.value = error instanceof Error ? error.message : '加载提交内容失败' } finally { loadingFiles.value = false }
+  } catch (error) { errorMessage.value = error instanceof Error ? error.message : '加载提交内容失败' } finally { commitLoading.value = false }
 }
 
 function exitCommitView() {
@@ -941,27 +982,39 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             <div v-if="pullLoadErrors.length" class="load-warning">部分项目 PR 加载失败：{{ pullLoadErrors.join('；') }}</div>
             <div class="pr-workspace">
             <aside class="pr-list"><div v-if="!filteredPulls.length && !loadingPulls" class="list-empty">没有开放 PR</div><button v-for="item in filteredPulls" :key="`${item.project.id}-${item.pull.number}`" :class="['pr-item', { selected: isSelected(item) }]" @click="selectPull(item)"><span class="project-badge" :title="item.project.repository">{{ item.project.name }}</span><strong>#{{ item.pull.number }} {{ item.pull.title }}</strong><span>{{ authorOf(item.pull) }}</span><small class="pr-branches"><span class="branch-chip branch-head" :class="{ 'branch-main': isMainBranch(item.pull.head?.ref || item.pull.head?.label) }" :title="item.pull.head?.label || item.pull.head?.ref">{{ item.pull.head?.ref || item.pull.head?.label || '?' }}</span><span class="branch-arrow">→</span><span class="branch-chip branch-base" :class="{ 'branch-main': isMainBranch(item.pull.base?.ref || item.pull.base?.label) }" :title="item.pull.base?.label || item.pull.base?.ref">{{ item.pull.base?.ref || item.pull.base?.label || '?' }}</span></small><small class="pr-time">{{ formatTime(item.pull.created_at) }}</small></button></aside>
-            <section class="code-panel" :class="{ 'has-list': files.length > 0 && !loadingFiles }" :style="files.length > 0 && !loadingFiles ? { gridTemplateColumns: `${fileListWidth}px 5px minmax(0, 1fr)` } : undefined"><aside v-if="files.length > 0 && !loadingFiles" class="file-list"><div class="sidebar-tabs"><button :class="{ active: sidebarTab === 'files' }" @click="sidebarTab = 'files'">文件</button><button :class="{ active: sidebarTab === 'commits' }" @click="sidebarTab = 'commits'">提交记录</button></div><div class="file-list-scroll"><template v-if="sidebarTab === 'files'"><button v-for="row in fileTreeRows" :key="row.type + ':' + row.key" :class="['file-item', { dir: row.type === 'dir', active: row.type === 'file' && row.index === activeFileIndex }]" :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }" :title="row.key" @click="row.type === 'dir' ? toggleDir(row.key) : jumpToFile(row.index)"><span v-if="row.type === 'dir'" class="file-toggle">{{ isDirExpanded(row.key) || fileQuery.trim() ? '▾' : '▸' }}</span><span class="file-name">{{ row.name }}</span><span class="file-stat"><span class="stat-added">+{{ row.added }}</span><span class="stat-removed">-{{ row.removed }}</span></span></button></template><template v-else><button v-for="commit in commits" :key="commit.sha" :class="['commit-item', { active: viewingCommit?.sha === commit.sha }]" :title="firstLine(commit.commit?.message)" @click="selectCommit(commit)"><span class="commit-message">{{ firstLine(commit.commit?.message) }}</span><span class="commit-meta"><span>{{ commit.commit?.author?.name || '未知提交人' }}</span><span class="commit-sha" title="点击复制 SHA" @click.stop="copyCommitSha(commit)">{{ shortSha(commit.sha) }}</span><span class="history-time">{{ formatTime(commit.commit?.author?.date) }}</span></span></button><div v-if="!commits.length" class="settings-empty">暂无提交记录</div></template></div></aside><div v-if="files.length > 0 && !loadingFiles" class="resize-handle" @mousedown="startResize"></div><div class="files-main"><div v-if="loadingFiles" class="empty-state">加载文件中…</div><div v-else-if="!selectedPull" class="empty-state">选择一个 PR 查看变更与操作</div><div v-else-if="!files.length" class="empty-state">该 PR 没有可展示的文件</div><template v-else><div class="files-toolbar"><span v-if="viewingCommit" class="commit-viewing">正在查看提交 <span class="commit-sha">{{ shortSha(viewingCommit.sha) }}</span> · {{ files.length }} 个文件<button type="button" class="commit-back" @click="exitCommitView">← 返回 PR 文件</button></span><span v-else>{{ fileQuery.trim() ? `${matchedCount}/${files.length} 个文件` : `${files.length} 个文件` }}</span><span class="toolbar-stats"><span class="stat-added">+{{ totalStats.added }}</span><span class="stat-removed">-{{ totalStats.removed }}</span></span><span class="toolbar-spacer"></span><input v-model="fileQuery" class="file-search" placeholder="搜索文件名" /><button @click="setAllFilesExpanded(true)">全部展开</button><button @click="setAllFilesExpanded(false)">全部收起</button></div><div ref="filesScrollEl" class="files-scroll" @scroll="onFilesScroll"><div v-for="(file, index) in files" :id="`pr-file-card-${index}`" :key="file.filename" v-show="fileMatches(file.filename)" :data-index="index" class="file-card"><button class="file-card-header" @click="toggleFile(file.filename)"><span class="file-toggle">{{ isFileExpanded(file.filename) ? '▾' : '▸' }}</span><span class="file-name" :title="file.filename">{{ file.filename }}</span><span class="file-stat"><span class="stat-added">+{{ fileStats[index]?.added ?? 0 }}</span><span class="stat-removed">-{{ fileStats[index]?.removed ?? 0 }}</span></span><span class="copy-btn" title="复制 diff" @click.stop="copyPatch(file)">复制</span><span class="copy-btn full-toggle" :class="{ active: isFullFileView(file.filename) }" title="查看完整文件 / 切回 diff" @click.stop="toggleFullFile(file)">{{ isFullFileView(file.filename) ? '返回 diff' : '完整文件' }}</span></button><pre v-if="isFileExpanded(file.filename) && isFullFileView(file.filename)" class="code-view file-diff full-file">{{ fullFileLoading[file.filename] ? '加载中…' : fullFileContents[file.filename] || '无法加载文件内容' }}</pre><pre v-else-if="isFileExpanded(file.filename)" class="code-view file-diff"><code><span v-for="(line, lineIndex) in fileDiffs[index]" :key="lineIndex" :class="['code-line', `line-${line.kind}`]"><span class="line-prefix">{{ line.prefix }}</span><span v-html="line.html"></span></span></code></pre></div></div></template></div></section>
+            <section class="code-panel" :class="{ 'has-list': files.length > 0 && !loadingFiles }" :style="files.length > 0 && !loadingFiles ? { gridTemplateColumns: `${fileListWidth}px 5px minmax(0, 1fr)` } : undefined"><aside v-if="files.length > 0 && !loadingFiles" class="file-list"><div class="sidebar-tabs"><button :class="{ active: sidebarTab === 'files' }" @click="sidebarTab = 'files'">文件</button><button :class="{ active: sidebarTab === 'commits' }" @click="sidebarTab = 'commits'">提交记录</button></div><div class="file-list-scroll"><template v-if="sidebarTab === 'files'"><button v-for="row in fileTreeRows" :key="row.type + ':' + row.key" :class="['file-item', { dir: row.type === 'dir', active: row.type === 'file' && row.index === activeFileIndex }]" :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }" :title="row.key" @click="row.type === 'dir' ? toggleDir(row.key) : jumpToFile(row.index)"><span v-if="row.type === 'dir'" class="file-toggle">{{ isDirExpanded(row.key) || fileQuery.trim() ? '▾' : '▸' }}</span><span class="file-name">{{ row.name }}</span><span class="file-stat"><span class="stat-added">+{{ row.added }}</span><span class="stat-removed">-{{ row.removed }}</span></span></button></template><template v-else><button v-for="commit in commits" :key="commit.sha" :class="['commit-item', { active: viewingCommit?.sha === commit.sha }]" :title="firstLine(commit.commit?.message)" @click="selectCommit(commit)"><span class="commit-message">{{ firstLine(commit.commit?.message) }}</span><span class="commit-meta"><span>{{ commit.commit?.author?.name || '未知提交人' }}</span><span class="commit-sha" title="点击复制 SHA" @click.stop="copyCommitSha(commit)">{{ shortSha(commit.sha) }}</span><span class="history-time">{{ formatTime(commit.commit?.author?.date) }}</span></span></button><div v-if="!commits.length" class="settings-empty">暂无提交记录</div></template></div></aside><div v-if="files.length > 0 && !loadingFiles" class="resize-handle" @mousedown="startResize"></div><div class="files-main"><div v-if="loadingFiles" class="empty-state">加载文件中…</div><div v-else-if="commitLoading" class="empty-state">加载提交内容…</div><div v-else-if="!selectedPull" class="empty-state">选择一个 PR 查看变更与操作</div><div v-else-if="!files.length" class="empty-state">该 PR 没有可展示的文件</div><template v-else><div class="files-toolbar"><span v-if="viewingCommit" class="commit-viewing">正在查看提交 <span class="commit-sha">{{ shortSha(viewingCommit.sha) }}</span> · {{ files.length }} 个文件<button type="button" class="commit-back" @click="exitCommitView">← 返回 PR 文件</button></span><span v-else>{{ fileQuery.trim() ? `${matchedCount}/${files.length} 个文件` : `${files.length} 个文件` }}</span><span class="toolbar-stats"><span class="stat-added">+{{ totalStats.added }}</span><span class="stat-removed">-{{ totalStats.removed }}</span></span><span class="toolbar-spacer"></span><input v-model="fileQuery" class="file-search" placeholder="搜索文件名" /><button @click="setAllFilesExpanded(true)">全部展开</button><button @click="setAllFilesExpanded(false)">全部收起</button></div><div ref="filesScrollEl" class="files-scroll" @scroll="onFilesScroll"><div v-for="(file, index) in files" :id="`pr-file-card-${index}`" :key="file.filename" v-show="fileMatches(file.filename)" :data-index="index" class="file-card"><button class="file-card-header" @click="toggleFile(file.filename)"><span class="file-toggle">{{ isFileExpanded(file.filename) ? '▾' : '▸' }}</span><span class="file-name" :title="file.filename">{{ file.filename }}</span><span class="file-stat"><span class="stat-added">+{{ fileStats[index]?.added ?? 0 }}</span><span class="stat-removed">-{{ fileStats[index]?.removed ?? 0 }}</span></span><span class="copy-btn" title="复制 diff" @click.stop="copyPatch(file)">复制</span><span class="copy-btn full-toggle" :class="{ active: isFullFileView(file.filename) }" title="查看完整文件 / 切回 diff" @click.stop="toggleFullFile(file)">{{ isFullFileView(file.filename) ? '返回 diff' : '完整文件' }}</span></button><pre v-if="isFileExpanded(file.filename) && isFullFileView(file.filename)" class="code-view file-diff full-file">{{ fullFileLoading[file.filename] ? '加载中…' : fullFileContents[file.filename] || '无法加载文件内容' }}</pre><pre v-else-if="isFileExpanded(file.filename)" class="code-view file-diff"><code><span v-for="(line, lineIndex) in fileDiffs[index]" :key="lineIndex" :class="['code-line', `line-${line.kind}`]"><span class="line-prefix">{{ line.prefix }}</span><span v-html="line.html"></span></span></code></pre></div></div></template></div></section>
           </div>
           </template>
         </section>
         <section v-else-if="activePage === 'deployments'" class="page">
-          <div class="page-heading"><div><h1>部署</h1><p>管理各项目的部署配置，执行部署并查看日志。</p></div><button class="primary" :disabled="!projects.length" @click="openAddConfig">添加配置</button></div>
+          <div class="page-heading"><div><h1>部署</h1><p>管理各项目的部署目标，支持多服务器顺序执行与单台执行。</p></div></div>
           <div v-if="!projects.length" class="empty-state">还没有项目，请先在项目页添加。</div>
-          <div v-else class="deploy-table-wrap">
-            <table class="deploy-table">
-              <thead><tr><th>项目</th><th>服务器</th><th>用户</th><th>远程目录</th><th>命令</th><th>操作</th></tr></thead>
-              <tbody>
-                <tr v-for="row in deploymentRows" :key="row.projectId">
-                  <td>{{ row.projectName }}</td>
-                  <td><span v-if="row.host">{{ row.host }}</span><span v-else class="muted">未配置</span></td>
-                  <td>{{ row.username }}</td>
-                  <td>{{ row.remotePath }}</td>
-                  <td class="deploy-cmd">{{ row.command }}</td>
-                  <td><div class="row-actions"><button class="primary" :disabled="!configComplete(row) || deployLog.running" :title="configComplete(row) ? '' : '请先完善配置'" @click="runProjectDeployment(row)">{{ deployLog.running && deployLog.projectId === row.projectId ? '部署中…' : '执行部署' }}</button><button @click="openEditConfig(row)">编辑</button><button class="danger" :disabled="!row.host && !row.username && !row.remotePath && !row.command" @click="askDeleteConfig(row)">删除</button></div></td>
-                </tr>
-              </tbody>
-            </table>
+          <div v-else class="deploy-groups">
+            <div v-for="group in deploymentGroups" :key="group.project.id" class="deploy-group">
+              <div class="deploy-group-header">
+                <strong>{{ group.project.name }}</strong>
+                <span class="muted">{{ group.targets.length ? `${group.targets.filter(configComplete).length}/${group.targets.length} 台可部署` : '未配置目标' }}</span>
+                <span class="toolbar-spacer"></span>
+                <div class="row-actions">
+                  <button class="primary" :disabled="!group.targets.some(configComplete) || deployLog.running" @click="runGroupDeployment(group)">{{ deployLog.running && deployLog.projectId === group.project.id ? '部署中…' : '全部执行' }}</button>
+                  <button @click="openAddTarget(group)">添加目标</button>
+                </div>
+              </div>
+              <div v-if="group.targets.length" class="deploy-target-rows">
+                <div v-for="target in group.targets" :key="target.id" class="deploy-target-row">
+                  <span class="target-name">{{ target.name || target.host }}</span>
+                  <code class="target-host">{{ target.username }}@{{ target.host }}</code>
+                  <span class="target-path">{{ target.remotePath || '—' }}</span>
+                  <code class="target-cmd">{{ target.command || '—' }}</code>
+                  <div class="row-actions">
+                    <button class="primary" :disabled="!configComplete(target) || deployLog.running" @click="runTargetDeployment(target)">执行</button>
+                    <button @click="openEditTarget(target)">编辑</button>
+                    <button class="danger" @click="askDeleteTarget(target)">删除</button>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="deploy-target-empty">点击右上角“添加目标”配置第一台服务器。</div>
+            </div>
           </div>
           <div v-if="deployLog.projectId" class="settings-section deploy-log-section">
             <h2>部署日志 · {{ deployLog.projectName }}<span v-if="deployLog.running" class="deploy-running">执行中…</span></h2>
@@ -1010,7 +1063,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
       <form class="modal" @submit.prevent="submitCreatePr"><h2>创建 PR</h2><div v-if="createPrError" class="error-message">{{ createPrError }}</div><label>项目<DropdownSelect v-model="createPrForm.projectId" :options="projects.map((project) => ({ value: project.id, label: `${project.name}（${project.repository}）` }))" /></label><label>标题<input v-model="createPrForm.title" placeholder="PR 标题" /></label><label>来源分支(head)<input v-model="createPrForm.head" placeholder="dock" /></label><label>目标分支(base)<input v-model="createPrForm.base" placeholder="master" /></label><div class="modal-actions"><button type="button" @click="showCreatePr = false">取消</button><button class="primary" type="submit" :disabled="creatingPr">{{ creatingPr ? '创建中…' : '创建' }}</button></div></form>
     </div>
     <div v-if="configModal" class="modal-backdrop" @click.self="configModal = false">
-      <form class="modal" @submit.prevent="saveConfig"><h2>{{ configForm.isNew ? '添加部署配置' : '编辑部署配置' }}</h2><div v-if="configFormError" class="error-message">{{ configFormError }}</div><label>项目<DropdownSelect v-if="configForm.isNew" v-model="configForm.projectId" :options="projects.map((project) => ({ value: project.id, label: `${project.name}（${project.repository}）` }))" /><input v-else :value="configForm.projectName" disabled /></label><label>服务器地址<span class="combo"><input v-model="configForm.host" placeholder="example.com" @focus="showHostSuggestions = true" @blur="showHostSuggestions = false" /><span v-if="showHostSuggestions && hostSuggestions.length" class="combo-menu"><button type="button" v-for="host in hostSuggestions" :key="host" @mousedown.prevent="pickHost(host)">{{ host }}</button></span></span></label><label>SSH 用户<span class="combo"><input v-model="configForm.username" placeholder="deploy" @focus="showUserSuggestions = true" @blur="showUserSuggestions = false" /><span v-if="showUserSuggestions && userSuggestions.length" class="combo-menu"><button type="button" v-for="username in userSuggestions" :key="username" @mousedown.prevent="pickUser(username)">{{ username }}</button></span></span></label><label>远程目录<input v-model="configForm.remotePath" placeholder="/srv/app" /></label><label>部署命令<input v-model="configForm.command" placeholder="git pull && ./deploy.sh" /></label><div class="modal-actions"><button type="button" @click="configModal = false">取消</button><button class="primary" type="submit" :disabled="savingConfig">{{ savingConfig ? '保存中…' : '保存' }}</button></div></form>
+      <form class="modal" @submit.prevent="saveTarget"><h2>{{ configForm.id ? '编辑部署目标' : '添加部署目标' }}</h2><div v-if="configFormError" class="error-message">{{ configFormError }}</div><label>项目<input :value="configForm.projectName" disabled /></label><label>目标别名<input v-model="configForm.name" placeholder="如 web-1 / staging" /></label><label>服务器地址<span class="combo"><input v-model="configForm.host" placeholder="example.com" @focus="showHostSuggestions = true" @blur="showHostSuggestions = false" /><span v-if="showHostSuggestions && hostSuggestions.length" class="combo-menu"><button type="button" v-for="host in hostSuggestions" :key="host" @mousedown.prevent="pickHost(host)">{{ host }}</button></span></span></label><label>SSH 用户<span class="combo"><input v-model="configForm.username" placeholder="deploy" @focus="showUserSuggestions = true" @blur="showUserSuggestions = false" /><span v-if="showUserSuggestions && userSuggestions.length" class="combo-menu"><button type="button" v-for="username in userSuggestions" :key="username" @mousedown.prevent="pickUser(username)">{{ username }}</button></span></span></label><label>远程目录<input v-model="configForm.remotePath" placeholder="/srv/app" /></label><label>部署命令<input v-model="configForm.command" placeholder="git pull && ./deploy.sh" /></label><div class="modal-actions"><button type="button" @click="configModal = false">取消</button><button class="primary" type="submit" :disabled="savingConfig">{{ savingConfig ? '保存中…' : '保存' }}</button></div></form>
     </div>
     <div v-if="toastMessage" class="toast">{{ toastMessage }}</div>
     <div v-if="oneClickRun" class="modal-backdrop">
@@ -1019,7 +1072,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
         <ol class="progress-steps">
           <li v-for="(step, index) in oneClickSteps" :key="index" :class="step.state"><span class="step-dot">{{ step.state === 'done' ? '✓' : step.state === 'failed' ? '✗' : index + 1 }}</span>{{ step.label }}</li>
         </ol>
-        <div v-if="oneClickRun.deployTarget" class="deploy-target-info">部署目标：<code>{{ oneClickRun.deployTarget.username }}@{{ oneClickRun.deployTarget.host }}</code><span class="target-sep">·</span>远程目录：<code>{{ oneClickRun.deployTarget.remotePath }}</code></div>
+        <div v-if="oneClickRun.deployTarget" class="deploy-target-info">部署目标：<code>{{ oneClickRun.deployTarget.name || oneClickRun.deployTarget.host }}</code><span class="target-sep">·</span><code>{{ oneClickRun.deployTarget.username }}@{{ oneClickRun.deployTarget.host }}</code><span class="target-sep">·</span>远程目录：<code>{{ oneClickRun.deployTarget.remotePath }}</code></div>
         <div v-if="oneClickRun.lastDeploy" class="deploy-target-info">上次部署：<code>{{ oneClickRun.lastDeploy.createdAt }}</code><span class="target-sep">·</span>结果：<code>{{ oneClickRun.lastDeploy.success ? '成功' : '失败' }}</code></div>
         <pre v-if="oneClickRun.withDeploy" ref="modalLogEl" class="deploy-output">{{ oneClickRun.log || '等待部署输出…' }}</pre>
         <div class="modal-actions"><button v-if="oneClickRun.failed" class="primary" :disabled="oneClickRun.running" @click="runOneClick()">重试</button><button :disabled="oneClickRun.running" @click="oneClickRun = null">{{ oneClickRun.running ? '执行中…' : '关闭' }}</button></div>

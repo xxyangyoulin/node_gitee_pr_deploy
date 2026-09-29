@@ -18,14 +18,14 @@ function check(name, cond) {
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/projects') return route.fulfill({ json: PROJECTS })
-    if (path === '/api/deployment/configs') return route.fulfill({ json: [{ projectId: 1, projectName: 'proj-one', host: '', username: '', remotePath: '', command: '' }] })
+    if (path === '/api/deployment/targets') return route.fulfill({ json: [] })
     if (path === '/api/settings') return route.fulfill({ json: { prHead: 'dock', prBase: 'master', mergeMethod: 'merge' } })
     if (path === '/api/meta') return route.fulfill({ json: { version: '9.9.9', dataPath: '/tmp/x' } })
     return route.fulfill({ json: {} })
   })
 
   await page.goto(`${BASE_URL}/#/deployments`, { waitUntil: 'networkidle' })
-  check('hash 直开 #/deployments 生效', await page.locator('.deploy-table').isVisible())
+  check('hash 直开 #/deployments 生效', await page.locator('.deploy-group').isVisible())
 
   await page.locator('.topbar-nav .nav-item', { hasText: '设置' }).click()
   check('切换设置后 hash 更新', new URL(page.url()).hash === '#/settings')

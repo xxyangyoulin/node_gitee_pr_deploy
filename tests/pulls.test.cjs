@@ -14,6 +14,7 @@ const saved = { approves: [], merges: [], tests: [], creates: [], runs: [] }
 const mergedNumbers = []
 let createdNumber = 13
 let merge14Failed = false
+let target22Failed = false
 let projTwoPullsFail = false
 const deployLogs = [{ id: 1, projectId: 2, projectName: 'proj-two', host: 'deploy@a.com', output: 'old run', success: 1, createdAt: '2026-09-01 10:00:00' }]
 let failures = 0
@@ -41,7 +42,6 @@ function check(name, cond) {
     if (path === '/api/gitee/test-pull') { saved.tests.push(req.postDataJSON()); return route.fulfill({ json: {} }) }
     if (path === '/api/gitee/merge-pull') {
       const input = req.postDataJSON()
-      if (input.number === 14 && !merge14Failed) { merge14Failed = true; return route.fulfill({ status: 500, json: { message: 'mock merge conflict' } }) }
       saved.merges.push(input)
       mergedNumbers.push(input.number)
       return route.fulfill({ json: {} })
@@ -60,14 +60,19 @@ function check(name, cond) {
       return route.fulfill({ json: rows.slice(0, Number(url.searchParams.get('limit')) || 20).map((log) => ({ ...log })) })
     }
     if (path === '/api/deployment/run') {
-      const projectId = req.postDataJSON().projectId
-      saved.runs.push(projectId)
-      deployLogs.unshift({ id: deployLogs.length + 1, projectId, projectName: projectId === 1 ? 'proj-one' : 'proj-two', host: 'deploy@a.com', output: 'deploy out\n[部署完成]', success: 1, createdAt: '2026-09-28 12:00:00' })
+      const targetId = req.postDataJSON().targetId
+      saved.runs.push(targetId)
+      if (targetId === 22 && !target22Failed) { target22Failed = true; return route.fulfill({ status: 500, json: { message: 'mock 目标宕机' } }) }
+      deployLogs.unshift({ id: deployLogs.length + 1, projectId: 2, projectName: 'proj-two', targetName: targetId === 21 ? 'web-1' : 'web-2', host: 'deploy@a.com', output: 'deploy out\n[部署完成]', success: 1, createdAt: '2026-09-28 12:00:00' })
       return route.fulfill({ json: 'deploy out\n[部署完成]' })
     }
     if (path === '/api/gitee/pull-logs') return route.fulfill({ json: [] })
     if (path === '/api/gitee/pull-files') return route.fulfill({ json: [] })
-    if (path === '/api/deployment/configs') return route.fulfill({ json: [{ projectId: 1, projectName: 'proj-one', host: 'a.com', username: 'deploy', remotePath: '/srv/one', command: './deploy.sh' }, { projectId: 2, projectName: 'proj-two', host: 'a.com', username: 'deploy', remotePath: '/srv/two', command: './deploy.sh' }] })
+    if (path === '/api/deployment/targets') return route.fulfill({ json: [
+      { id: 11, projectId: 1, projectName: 'proj-one', name: 'main-1', host: 'a.com', username: 'deploy', remotePath: '/srv/one', command: './deploy.sh', position: 0 },
+      { id: 21, projectId: 2, projectName: 'proj-two', name: 'web-1', host: 'a.com', username: 'deploy', remotePath: '/srv/two', command: './deploy.sh', position: 0 },
+      { id: 22, projectId: 2, projectName: 'proj-two', name: 'web-2', host: 'b.org', username: 'root', remotePath: '/srv/two', command: './deploy.sh', position: 1 },
+    ] })
     return route.fulfill({ json: {} })
   })
 
@@ -107,10 +112,12 @@ function check(name, cond) {
   await page.waitForTimeout(2500)
   check('仍在当前页面(未跳转部署页)', new URL(page.url()).hash === '#/pulls')
   check('进度弹窗已打开', await page.locator('.one-click-modal').isVisible())
-  check('失败步骤标红', (await page.locator('.progress-steps li.failed').count()) === 1 && (await page.locator('.progress-steps li.failed').textContent()).includes('合并 master 分支 PR'))
+  console.log('实际 runs 序列:', JSON.stringify(saved.runs), '| 弹窗步骤:', JSON.stringify(await page.locator('.progress-steps li').allTextContents()))
+  check('逐台执行且失败终止', JSON.stringify(saved.runs) === JSON.stringify([21, 22]))
+  check('失败步骤标红', (await page.locator('.progress-steps li.failed').count()) === 1 && (await page.locator('.progress-steps li.failed').textContent()).includes('执行部署'))
   check('重试按钮出现', (await page.locator('.one-click-modal button', { hasText: '重试' }).count()) === 1)
 
-  // 重试:跳过已完成步骤,从失败处继续
+  // 重试:跳过已完成步骤与已部署目标,从失败处继续
   await page.locator('.one-click-modal button', { hasText: '重试' }).click()
   await page.waitForTimeout(2500)
   check('重试后 4 步全部完成', (await page.locator('.progress-steps li.done').count()) === 4)
@@ -118,11 +125,11 @@ function check(name, cond) {
   check('自动创建 dock→master PR', saved.creates.at(-1)?.repository === 'owner/proj-two' && saved.creates.at(-1)?.head === 'dock' && saved.creates.at(-1)?.base === 'master' && saved.creates.at(-1)?.title === 'chore deps')
   check('阶段二合并新建 PR #14', JSON.stringify(saved.merges.map((item) => item.number)) === JSON.stringify([13, 14]))
   check('重试未重复前置步骤', saved.creates.length === 1)
+  check('重试仅重跑失败目标 web-2', JSON.stringify(saved.runs) === JSON.stringify([21, 22, 22]))
   check('审查+测试覆盖两个 PR(重试合法重复)', JSON.stringify([...new Set(saved.approves.map((item) => item.number))].sort((a, b) => a - b)) === JSON.stringify([13, 14]) && saved.approves.at(-1)?.number === 14 && saved.tests.at(-1)?.number === 14)
   check('弹窗内显示部署日志', (await page.locator('.one-click-modal .deploy-output').textContent()).includes('[部署完成]'))
-  check('弹窗显示部署目标(项目2)', (await page.locator('.deploy-target-info').first().textContent()).includes('/srv/two'))
-  check('弹窗显示上次部署记录', (await page.locator('.deploy-target-info').last().textContent()).includes('2026-09-01 10:00:00'))
-  check('部署仅执行一次', saved.runs.length === 1 && saved.runs[0] === 2)
+  check('弹窗显示部署目标(项目2 web-2)', (await page.locator('.deploy-target-info').first().textContent()).includes('web-2'))
+  check('弹窗显示上次部署记录(重试后为最新一次)', (await page.locator('.deploy-target-info').last().textContent()).includes('2026-09-28 12:00:00'))
   await page.locator('.one-click-modal button', { hasText: '关闭' }).click()
   check('关闭进度弹窗', (await page.locator('.one-click-modal').count()) === 0)
   await page.screenshot({ path: shot('pulls-oneclick.png') })
@@ -141,7 +148,7 @@ function check(name, cond) {
   await page.waitForTimeout(2500)
   check('直连流程仅合并当前 PR #7', saved.merges.length === mergesBeforeDirect + 1 && saved.merges.at(-1)?.number === 7)
   check('未创建二级 PR', saved.creates.length === createsBeforeDirect)
-  check('部署已执行', saved.runs.at(-1) === 1)
+  check('部署已执行', saved.runs.at(-1) === 11)
   check('进度弹窗 2 步全部完成', (await page.locator('.progress-steps li.done').count()) === 2)
   check('弹窗显示部署日志', (await page.locator('.one-click-modal .deploy-output').textContent()).includes('[部署完成]'))
   check('弹窗显示部署目标(项目1)', (await page.locator('.deploy-target-info').textContent()).includes('/srv/one'))

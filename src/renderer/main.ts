@@ -19,12 +19,12 @@ window.releaseConsole = {
   getSettings: () => request('/api/settings'),
   saveSettings: (input) => request('/api/settings', { method: 'POST', body: JSON.stringify(input) }),
   getMeta: () => request('/api/meta'),
-  listDeploymentConfigs: () => request('/api/deployment/configs'),
-  deleteDeploymentConfig: (projectId) => request(`/api/deployment/config?projectId=${projectId}`, { method: 'DELETE' }),
+  listDeploymentConfigs: () => request('/api/deployment/targets'),
+  saveDeploymentTarget: (input) => request('/api/deployment/targets', { method: 'POST', body: JSON.stringify(input) }),
+  deleteDeploymentTarget: (id) => request('/api/deployment/targets/delete', { method: 'POST', body: JSON.stringify({ id }) }),
   listDeploymentServers: () => request('/api/deployment/servers'),
-  saveDeploymentConfig: (input) => request('/api/deployment/config', { method: 'POST', body: JSON.stringify(input) }),
-  runDeployment: async (projectId, onChunk) => {
-    const response = await fetch('/api/deployment/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId }) })
+  runDeployment: async (targetId, onChunk) => {
+    const response = await fetch('/api/deployment/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId }) })
     if (!response.ok) {
       let message = `请求失败: ${response.status}`
       try { message = (await response.json()).message || message } catch { }
