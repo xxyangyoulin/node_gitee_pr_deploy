@@ -18,6 +18,7 @@ interface Window {
     pullRequestLogs(input: { repository: string; token: string; number: number }): Promise<any[]>
     pullRequestFiles(input: { repository: string; token: string; number: number }): Promise<any[]>
     pullRequestCommits(input: { repository: string; token: string; number: number }): Promise<any[]>
+    commitDetail(input: { repository: string; token: string; sha: string }): Promise<any>
     approvePullRequest(input: { repository: string; token: string; number: number }): Promise<any>
     testPullRequest(input: { repository: string; token: string; number: number }): Promise<any>
     pullFileContent(input: { repository: string; token: string; url: string }): Promise<string>

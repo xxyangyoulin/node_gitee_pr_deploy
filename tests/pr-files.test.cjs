@@ -26,6 +26,10 @@ function check(name, cond) {
       { sha: 'abc1234567890abcdef', commit: { message: 'fix: 修复登录问题\n\n详细说明', author: { name: 'alice', date: '2026-09-27T10:00:00+08:00' } } },
       { sha: 'def9876543210abcdef', commit: { message: 'chore: 升级依赖', author: { name: 'bob', date: '2026-09-28T11:30:00+08:00' } } },
     ] })
+    if (path === '/api/gitee/commit-detail') {
+      const sha = req.postDataJSON().sha
+      return route.fulfill({ json: { sha, files: [{ filename: `from-${sha.slice(0, 7)}.ts`, patch: `+++ b/x\n@@ -1,1 +1,2 @@\n-old\n+new-${sha.slice(0, 7)}` }] } })
+    }
     if (path === '/api/gitee/file') return route.fulfill({ json: { content: Buffer.from('full file content line1\nline2').toString('base64') } })
     return route.fulfill({ json: {} })
   })
@@ -104,6 +108,29 @@ function check(name, cond) {
   check('短 SHA 展示', (await page.locator('.commit-item').first().locator('.commit-sha').textContent()) === 'abc1234')
   check('提交时间展示', (await page.locator('.commit-item').first().locator('.history-time').textContent()) === '2026-09-27 10:00')
   check('文件树随切换隐藏', (await page.locator('.file-list-scroll .file-item').count()) === 0)
+
+  // 点击提交 → 文件区展示该提交变动
+  await page.locator('.commit-item').first().click()
+  await page.waitForTimeout(300)
+  check('工具栏显示正在查看提交', (await page.locator('.commit-viewing').textContent()).includes('abc1234'))
+  check('文件区展示该提交的文件', (await page.locator('.file-card').count()) === 1 && (await page.locator('.file-card-header .file-name').textContent()) === 'from-abc1234.ts')
+  check('侧栏对应提交高亮', (await page.locator('.commit-item.active').count()) === 1)
+
+  // 再点同一条 → 返回 PR 文件
+  await page.locator('.commit-item').first().click()
+  await page.waitForTimeout(300)
+  check('再次点击返回 PR 文件', (await page.locator('.commit-viewing').count()) === 0 && (await page.locator('.file-card').count()) === 6)
+
+  // 切换到另一条提交
+  await page.locator('.commit-item').nth(1).click()
+  await page.waitForTimeout(300)
+  check('切换提交展示其文件', (await page.locator('.file-card-header .file-name').textContent()) === 'from-def9876.ts')
+
+  // 返回按钮
+  await page.locator('.commit-back').click()
+  await page.waitForTimeout(200)
+  check('返回按钮恢复 PR 文件', (await page.locator('.file-card').count()) === 6)
+
   await page.locator('.sidebar-tabs button', { hasText: '文件' }).click()
   await page.waitForTimeout(100)
   check('切回文件页签恢复树', (await page.locator('.file-list-scroll .file-item').count()) === 10)

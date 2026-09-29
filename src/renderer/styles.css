@@ -33,7 +33,12 @@ button { cursor: pointer; }
 .commit-item:hover { background: #f6f8fa; }
 .commit-message { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .commit-meta { display: flex; align-items: center; gap: 6px; overflow: hidden; font-size: 11px; color: #57606a; }
-.commit-sha { font-family: 'JetBrains Mono', monospace; color: #0969da; }
+.commit-sha { font-family: 'JetBrains Mono', monospace; color: #0969da; cursor: pointer; }
+.commit-item.active { background: #ddf4ff; }
+.commit-viewing { display: inline-flex; align-items: center; gap: 8px; padding: 3px 10px; border-radius: 6px; background: #ddf4ff; color: #0969da; font-weight: 600; }
+.commit-viewing .commit-sha { color: #0969da; }
+.commit-back { padding: 3px 8px; border: 1px solid #0969da; border-radius: 5px; background: #fff; color: #0969da; font-size: 12px; font-weight: 400; }
+.commit-back:hover { background: #0969da; color: #fff; }
 .file-item { display: flex; align-items: center; gap: 5px; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
 .file-item:hover { background: #f6f8fa; }
 .file-item.active { background: #ddf4ff; }

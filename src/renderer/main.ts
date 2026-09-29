@@ -54,6 +54,7 @@ window.releaseConsole = {
   pullRequestLogs: (input) => request('/api/gitee/pull-logs', { method: 'POST', body: JSON.stringify(input) }),
   pullRequestFiles: (input) => request('/api/gitee/pull-files', { method: 'POST', body: JSON.stringify(input) }),
   pullRequestCommits: (input) => request('/api/gitee/pull-commits', { method: 'POST', body: JSON.stringify(input) }),
+  commitDetail: (input) => request('/api/gitee/commit-detail', { method: 'POST', body: JSON.stringify(input) }),
   approvePullRequest: (input) => request('/api/gitee/approve-pull', { method: 'POST', body: JSON.stringify(input) }),
   testPullRequest: (input) => request('/api/gitee/test-pull', { method: 'POST', body: JSON.stringify(input) }),
   pullFileContent: async () => '',
