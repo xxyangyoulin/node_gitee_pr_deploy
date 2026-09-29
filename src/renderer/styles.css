@@ -225,3 +225,6 @@ button:disabled { cursor: not-allowed; }
 .pr-item .project-badge { align-self: flex-start; }
 .empty-state { padding: 28px; }
 .settings-form { margin-top: 16px; padding: 16px; }
+.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.loading-state p { margin: 0; color: #57606a; }
+.loading-anim { width: 88px; height: 88px; }
