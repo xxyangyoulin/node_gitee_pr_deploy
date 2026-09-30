@@ -69,6 +69,7 @@ const selectedAiVerdict = computed<{ needs_test: boolean; reason: string; risk_l
   try { return JSON.parse(raw) } catch { return null }
 })
 
+const settingsTab = ref<'general' | 'automation' | 'ai' | 'projects' | 'about'>('general')
 const aiTesting = ref(false)
 const aiTestMessage = ref('')
 
@@ -1203,19 +1204,25 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           </div>
         </section>
         <section v-else class="page">
-          <h1>设置</h1>
-          <form class="settings-section" @submit.prevent="saveAppSettings">
-            <h2>PR 与合并 / 自动化</h2>
+          <div class="page-heading"><div><h1>设置</h1><p>应用配置按页签分组管理。</p></div></div>
+          <div class="settings-tabs">
+            <button :class="{ active: settingsTab === 'general' }" @click="settingsTab = 'general'">通用</button>
+            <button :class="{ active: settingsTab === 'automation' }" @click="settingsTab = 'automation'">自动化</button>
+            <button :class="{ active: settingsTab === 'ai' }" @click="settingsTab = 'ai'">AI 模型</button>
+            <button :class="{ active: settingsTab === 'projects' }" @click="settingsTab = 'projects'">项目管理</button>
+            <button :class="{ active: settingsTab === 'about' }" @click="settingsTab = 'about'">关于</button>
+          </div>
+          <form v-if="settingsTab === 'general'" class="settings-section" @submit.prevent="saveAppSettings">
+            <h2>PR 与合并</h2>
             <label>PR 来源分支(head)<input v-model="settings.prHead" placeholder="dock" /></label>
             <label>PR 目标分支(base)<input v-model="settings.prBase" placeholder="master" /></label>
             <label>合并方式<DropdownSelect v-model="settings.mergeMethod" :options="[{ value: 'merge', label: 'merge · 保留完整历史' }, { value: 'rebase', label: 'rebase · 变基合并' }, { value: 'squash', label: 'squash · 压缩为单个提交' }]" /></label>
-            <label>轮询间隔(秒,最小 60)<input v-model="settings.pollIntervalSec" type="number" min="60" step="10" /></label>
+            <button class="primary" type="submit">保存设置</button>
+          </form>
+          <form v-else-if="settingsTab === 'automation'" class="settings-section" @submit.prevent="saveAppSettings">
+            <h2>自动化</h2>
             <label>全局自动化<DropdownSelect v-model="settings.automationEnabled" :options="[{ value: '0', label: '关闭' }, { value: '1', label: '开启' }]" /></label>
-            <label>模型 Base URL<input v-model="settings.aiBaseUrl" placeholder="https://api.deepseek.com/v1" /></label>
-            <label>API Key<input v-model="settings.aiApiKey" type="password" autocomplete="off" placeholder="sk-..." /></label>
-            <label>模型名<input v-model="settings.aiModel" placeholder="deepseek-chat" /></label>
-            <label>评估提示词(留空用默认,支持 <code v-pre>{{title}}</code>/<code v-pre>{{body}}</code>/<code v-pre>{{files}}</code>/<code v-pre>{{diff}}</code> 变量)<textarea v-model="settings.aiPrompt" rows="5" class="ai-prompt"></textarea></label>
-            <div class="ai-test-row"><button type="button" :disabled="aiTesting" @click="testAi">{{ aiTesting ? '测试中…' : '测试连接' }}</button><span v-if="aiTestMessage" :class="aiTestMessage.startsWith('连接成功') ? 'stat-added' : 'stat-removed'">{{ aiTestMessage }}</span></div>
+            <label>轮询间隔(秒,最小 60)<input v-model="settings.pollIntervalSec" type="number" min="60" step="10" /></label>
             <div class="sync-project-list">
               <div v-for="row in syncStatusRows" :key="row.projectId" class="project-row">
                 <div class="project-row-info"><strong>{{ row.name }}</strong><span>{{ row.lastSyncAt ? `上次同步 ${row.lastSyncAt}` : '未同步' }}<template v-if="row.lastError"> · <em class="sync-error">{{ row.lastError }}</em></template></span></div>
@@ -1224,7 +1231,16 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             </div>
             <button class="primary" type="submit">保存设置</button>
           </form>
-          <div class="settings-section">
+          <form v-else-if="settingsTab === 'ai'" class="settings-section" @submit.prevent="saveAppSettings">
+            <h2>AI 模型</h2>
+            <label>模型 Base URL<input v-model="settings.aiBaseUrl" placeholder="https://api.deepseek.com/v1" /></label>
+            <label>API Key<input v-model="settings.aiApiKey" type="password" autocomplete="off" placeholder="sk-..." /></label>
+            <label>模型名<input v-model="settings.aiModel" placeholder="deepseek-chat" /></label>
+            <label>评估提示词(留空用默认,支持 <code v-pre>{{title}}</code>/<code v-pre>{{body}}</code>/<code v-pre>{{files}}</code>/<code v-pre>{{diff}}</code> 变量)<textarea v-model="settings.aiPrompt" rows="5" class="ai-prompt"></textarea></label>
+            <div class="ai-test-row"><button type="button" :disabled="aiTesting" @click="testAi">{{ aiTesting ? '测试中…' : '测试连接' }}</button><span v-if="aiTestMessage" :class="aiTestMessage.startsWith('连接成功') ? 'stat-added' : 'stat-removed'">{{ aiTestMessage }}</span></div>
+            <button class="primary" type="submit">保存设置</button>
+          </form>
+          <div v-else-if="settingsTab === 'projects'" class="settings-section">
             <h2>项目管理</h2>
             <div v-if="!projects.length" class="settings-empty">暂无项目，请先在项目页添加。</div>
             <div v-for="project in projects" :key="project.id" class="project-row">
@@ -1232,7 +1248,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
               <div class="row-actions"><button @click="startEditProject(project)">编辑</button><button class="danger" @click="deleteProject(project)">删除</button></div>
             </div>
           </div>
-          <div class="settings-section">
+          <div v-else-if="settingsTab === 'about'" class="settings-section">
             <h2>关于</h2>
             <div class="meta-row"><span>应用版本</span><code>{{ meta.version || '未知' }}</code></div>
             <div class="meta-row"><span>数据存储</span><code>{{ meta.dataPath || '未知' }}</code></div>
