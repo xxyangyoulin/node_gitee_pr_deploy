@@ -19,15 +19,28 @@ const pageList = [
   { id: 'settings', label: '设置' },
 ]
 function pageFromHash() {
-  const page = location.hash.replace(/^#\/?/, '')
-  return pageList.some((item) => item.id === page) ? page : 'projects'
+  const segments = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean)
+  return pageList.some((item) => item.id === segments[0]) ? segments[0] : 'projects'
+}
+function selectedFromHash(): { projectId: number; number: number } | null {
+  const segments = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean)
+  if (segments[0] !== 'pulls' || segments.length < 3) return null
+  const projectId = Number(segments[1])
+  const number = Number(segments[2])
+  return projectId && number ? { projectId, number } : null
 }
 const activePage = ref(pageFromHash())
+const hashSelected = selectedFromHash()
 function switchPage(page: string) {
   activePage.value = page
-  if (location.hash !== `#/${page}`) location.hash = `#/${page}`
+  const target = `#/${page}`
+  if (location.hash !== target) location.hash = target
 }
-window.addEventListener('hashchange', () => { activePage.value = pageFromHash() })
+window.addEventListener('hashchange', () => {
+  const next = pageFromHash()
+  if (next !== activePage.value) clearSelection()
+  activePage.value = next
+})
 
 function notifyDesktop(title: string, body: string) {
   try {
@@ -801,6 +814,11 @@ async function loadPulls() {
       syncStatusRows.value = await window.releaseConsole.syncStatus()
       pullLoadErrors.value = syncStatusRows.value.filter((row) => row.lastError).map((row) => `${row.name}：${row.lastError}`)
     } catch { }
+    if (hashSelected && !selectedPull.value) {
+      const match = pulls.value.find((item) => item.project.id === hashSelected.projectId && Number(item.pull.number) === hashSelected.number)
+      if (match) selectPull(match)
+      else if (!loadingPulls.value) history.replaceState(null, '', '#/pulls')
+    }
     if (selectedPull.value && !pulls.value.some((item) => isSelected(item))) clearSelection()
   } finally {
     loadingPulls.value = false
@@ -839,6 +857,7 @@ let selectionSeq = 0
 
 function selectPull(item: PullItem) {
   const seq = ++selectionSeq
+  history.replaceState(null, '', `#/pulls/${item.project.id}/${item.pull.number}`)
   void openPull(item, seq)
 }
 

@@ -132,6 +132,14 @@ function check(name, cond) {
   check('列表显示创建时间', (await page.locator('.pr-item').first().locator('.pr-time').textContent()) === '2026-09-28 09:00')
   await page.screenshot({ path: shot('pulls-aggregate.png') })
 
+  // 选中 PR 写入 URL;刷新后恢复选中
+  await page.locator('.pr-item').first().click()
+  await page.waitForTimeout(300)
+  check('选中后 URL 带 PR 标识', new URL(page.url()).hash === '#/pulls/2/13')
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  check('刷新后仍选中该 PR', (await page.locator('.pr-item.selected strong').textContent()).includes('#13'))
+
   await page.locator('.filter-select .dropdown-toggle').click()
   await page.locator('.dropdown-menu button', { hasText: 'proj-two' }).click()
   await page.waitForTimeout(100)
@@ -188,7 +196,7 @@ function check(name, cond) {
   check('一键部署首击进入确认态', (await page.locator('.heading-actions button.confirming', { hasText: '再次点击确认' }).count()) === 1)
   await page.locator('.heading-actions button.confirming').click()
   await page.waitForTimeout(2500)
-  check('仍在当前页面(未跳转部署页)', new URL(page.url()).hash === '#/pulls')
+  check('仍在当前页面(未跳转部署页)', new URL(page.url()).hash.startsWith('#/pulls'))
   check('进度弹窗已打开', await page.locator('.one-click-modal').isVisible())
   console.log('实际 runs 序列:', JSON.stringify(saved.runs), '| 弹窗步骤:', JSON.stringify(await page.locator('.progress-steps li').allTextContents()))
   check('逐台执行且失败终止', JSON.stringify(saved.runs) === JSON.stringify([21, 22]))
