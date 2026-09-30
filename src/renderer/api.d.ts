@@ -18,6 +18,7 @@ interface Window {
     cachedPulls(query?: { projectId?: number }): Promise<Array<{ projectId: number; projectName: string; repository: string; token: string; number: number; title: string; body: string; author: string; headRef: string; baseRef: string; headSha: string; state: string; statusNote: string; createdAt: string; updatedAt: string }>>
     refreshPulls(projectId?: number): Promise<{ results: Array<{ projectId: number; name: string; error: string }> }>
     syncStatus(): Promise<Array<{ projectId: number; name: string; lastSyncAt: string; lastError: string; enabled: number }>>
+    requestLogs(query?: { projectId?: number; status?: string; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; endpoint: string; method: string; ok: number; status: number; errorMessage: string; durationMs: number; createdAt: string }>>
     toggleSync(projectId: number, enabled: boolean): Promise<unknown>
     pullRequestDetail(input: { repository: string; token: string; number: number }): Promise<any>
     pullRequestLogs(input: { repository: string; token: string; number: number }): Promise<any[]>

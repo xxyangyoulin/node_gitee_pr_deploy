@@ -15,6 +15,7 @@ const pageList = [
   { id: 'projects', label: '项目' },
   { id: 'pulls', label: 'PR' },
   { id: 'deployments', label: '部署' },
+  { id: 'logs', label: '日志' },
   { id: 'settings', label: '设置' },
 ]
 function pageFromHash() {
@@ -184,6 +185,10 @@ const deploymentGroups = computed<DeployGroup[]>(() => projects.value.map((proje
 })))
 const deployHistory = ref<Array<{ id: number; projectId: number; projectName: string; targetName: string; host: string; output: string; success: number; createdAt: string }>>([])
 const historyFilter = ref<number | 'all'>('all')
+const requestLogRows = ref<Array<{ id: number; projectId: number; projectName: string; endpoint: string; method: string; ok: number; status: number; errorMessage: string; durationMs: number; createdAt: string }>>([])
+const requestLogFilter = ref<number | 'all'>('all')
+const requestLogStatus = ref<'all' | 'ok' | 'error'>('all')
+const loadingRequestLogs = ref(false)
 const filteredHistory = computed(() => historyFilter.value === 'all' ? deployHistory.value : deployHistory.value.filter((entry) => entry.projectId === historyFilter.value))
 const activeHistoryId = ref(0)
 const configModal = ref(false)
@@ -445,6 +450,7 @@ onMounted(async () => {
   try { meta.value = await window.releaseConsole.getMeta() } catch { }
   if (activePage.value === 'pulls') loadPulls()
   if (activePage.value === 'deployments') loadDeploymentRows()
+  if (activePage.value === 'logs') loadRequestLogs()
 })
 
 async function removeProject(project: Project) {
@@ -482,6 +488,13 @@ function applyPrDefaults() {
 async function loadSettings() {
   try { settings.value = await window.releaseConsole.getSettings() } catch { }
   applyPrDefaults()
+}
+
+async function loadRequestLogs() {
+  loadingRequestLogs.value = true
+  try {
+    requestLogRows.value = await window.releaseConsole.requestLogs({ projectId: requestLogFilter.value === 'all' ? undefined : requestLogFilter.value, status: requestLogStatus.value })
+  } finally { loadingRequestLogs.value = false }
 }
 
 async function toggleProjectSync(row: { projectId: number; enabled: number }) {
@@ -1048,7 +1061,9 @@ async function toggleFullFile(file: any) {
 watch(activePage, (page) => {
   if (page === 'pulls') loadPulls()
   if (page === 'deployments') loadDeploymentRows()
+  if (page === 'logs') loadRequestLogs()
 })
+watch([requestLogFilter, requestLogStatus], () => { if (activePage.value === 'logs') loadRequestLogs() })
 watch([sqlPopVisible, activePage, loadingFiles], () => nextTick(updateSqlPopPosition))
 window.addEventListener('resize', updateSqlPopPosition)
 onMounted(updateSqlPopPosition)
@@ -1143,6 +1158,27 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
               <span class="history-name">{{ entry.projectName }}</span>
               <span class="history-host">{{ entry.host }}</span>
               <span class="history-time">{{ entry.createdAt }}</span>
+            </div>
+          </div>
+        </section>
+        <section v-else-if="activePage === 'logs'" class="page">
+          <div class="page-heading">
+            <div><h1>日志</h1><p>Gitee 接口调用记录(保留最近 500 条)。</p></div>
+            <div class="heading-actions">
+              <DropdownSelect v-model="requestLogFilter" class="filter-select" :options="[{ value: 'all', label: '全部项目' }, ...projects.map((project) => ({ value: project.id, label: project.name }))]" />
+              <DropdownSelect v-model="requestLogStatus" class="filter-select" :options="[{ value: 'all', label: '全部状态' }, { value: 'ok', label: '仅成功' }, { value: 'error', label: '仅失败' }]" />
+              <button :disabled="loadingRequestLogs" @click="loadRequestLogs">{{ loadingRequestLogs ? '加载中…' : '刷新' }}</button>
+            </div>
+          </div>
+          <div class="settings-section log-section">
+            <div v-if="!requestLogRows.length && !loadingRequestLogs" class="settings-empty">暂无接口日志。</div>
+            <div v-for="row in requestLogRows" :key="row.id" :class="['log-row', { error: !row.ok }]">
+              <span class="log-time">{{ row.createdAt }}</span>
+              <span class="log-project">{{ row.projectName }}</span>
+              <code class="log-endpoint">{{ row.method }} {{ row.endpoint }}</code>
+              <span :class="row.ok ? 'stat-added' : 'stat-removed'">{{ row.ok ? `✓ ${row.status}` : `✗ ${row.status}` }}</span>
+              <span class="log-duration">{{ row.durationMs }}ms</span>
+              <span class="log-error" :title="row.errorMessage">{{ row.errorMessage }}</span>
             </div>
           </div>
         </section>

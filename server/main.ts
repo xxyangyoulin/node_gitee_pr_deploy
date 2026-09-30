@@ -19,6 +19,7 @@ try { database.exec('ALTER TABLE deployment_logs ADD COLUMN target_name TEXT NOT
 database.exec('CREATE TABLE IF NOT EXISTS deploy_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, name TEXT NOT NULL DEFAULT "", host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", remote_path TEXT NOT NULL DEFAULT "", command TEXT NOT NULL DEFAULT "", position INTEGER NOT NULL DEFAULT 0)')
 database.exec('CREATE TABLE IF NOT EXISTS pr_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL DEFAULT "", body TEXT NOT NULL DEFAULT "", author TEXT NOT NULL DEFAULT "", head_ref TEXT NOT NULL DEFAULT "", base_ref TEXT NOT NULL DEFAULT "", head_sha TEXT NOT NULL DEFAULT "", state TEXT NOT NULL DEFAULT "new", status_note TEXT NOT NULL DEFAULT "", raw TEXT NOT NULL DEFAULT "", gitee_created_at TEXT NOT NULL DEFAULT "", gitee_updated_at TEXT NOT NULL DEFAULT "", first_seen_at TEXT NOT NULL DEFAULT "", last_seen_at TEXT NOT NULL DEFAULT "", synced_at TEXT NOT NULL DEFAULT "", UNIQUE(project_id, number))')
 database.exec('CREATE TABLE IF NOT EXISTS sync_state (project_id INTEGER PRIMARY KEY, last_sync_at TEXT NOT NULL DEFAULT "", last_error TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1)')
+database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL DEFAULT 0, project_name TEXT NOT NULL DEFAULT "", endpoint TEXT NOT NULL DEFAULT "", method TEXT NOT NULL DEFAULT "GET", ok INTEGER NOT NULL DEFAULT 1, status INTEGER NOT NULL DEFAULT 0, error_message TEXT NOT NULL DEFAULT "", duration_ms INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
 {
   const targetCount = (database.prepare('SELECT COUNT(*) AS c FROM deploy_targets').get() as any).c
   if (!targetCount) {
@@ -31,6 +32,21 @@ database.exec('CREATE TABLE IF NOT EXISTS sync_state (project_id INTEGER PRIMARY
       database.prepare('INSERT INTO deploy_targets(project_id,name,host,username,remote_path,command,position) VALUES(?,?,?,?,?,?,?)').run(row.project_id, '默认', row.host, row.username, row.remotePath, row.command, position++)
     }
   }
+}
+
+import { setGiteeLogger } from './gitee.js'
+{
+  let logCounter = 0
+  setGiteeLogger((entry) => {
+    try {
+      const project = database.prepare('SELECT id, name FROM projects WHERE repository=?').get(entry.repository) as any
+      const createdAt = new Date().toISOString().replace('T', ' ').slice(0, 19)
+      database.prepare('INSERT INTO request_logs(project_id,project_name,endpoint,method,ok,status,error_message,duration_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?)')
+        .run(project?.id ?? 0, project?.name ?? entry.repository, entry.endpoint, entry.method, entry.ok ? 1 : 0, entry.status, entry.errorMessage, entry.durationMs, createdAt)
+      logCounter += 1
+      if (logCounter % 50 === 0) database.prepare('DELETE FROM request_logs WHERE id <= (SELECT MAX(id) - 500 FROM request_logs)').run()
+    } catch { /* 日志失败不影响主流程 */ }
+  })
 }
 
 const defaultSettings: Record<string, string> = { prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0' }
@@ -127,6 +143,20 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   }
   if (path === '/api/sync/status' && request.method === 'GET') {
     const rows = database.prepare('SELECT s.project_id AS projectId, p.name, s.last_sync_at AS lastSyncAt, s.last_error AS lastError, s.enabled FROM sync_state s JOIN projects p ON p.id=s.project_id ORDER BY s.project_id DESC').all()
+    return json(response, 200, rows)
+  }
+  if (path === '/api/request-logs' && request.method === 'GET') {
+    const params = new URL(request.url || '', 'http://localhost').searchParams
+    const projectId = Number(params.get('projectId')) || 0
+    const status = params.get('status') || 'all'
+    const limit = Math.min(Number(params.get('limit')) || 100, 300)
+    const conditions: string[] = []
+    const args: any[] = []
+    if (projectId) { conditions.push('project_id=?'); args.push(projectId) }
+    if (status === 'ok') conditions.push('ok=1')
+    if (status === 'error') conditions.push('ok=0')
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''
+    const rows = database.prepare(`SELECT id, project_id AS projectId, project_name AS projectName, endpoint, method, ok, status, error_message AS errorMessage, duration_ms AS durationMs, created_at AS createdAt FROM request_logs${where} ORDER BY id DESC LIMIT ?`).all(...args, limit)
     return json(response, 200, rows)
   }
   if (path === '/api/sync/toggle' && request.method === 'POST') {

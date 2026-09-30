@@ -3,7 +3,7 @@ const http = require('node:http')
 const path = require('node:path')
 
 const unitTests = ['poller.test.cjs']
-const tests = ['nav.test.cjs', 'pulls.test.cjs', 'pulls-overflow.test.cjs', 'deploy.test.cjs', 'settings.test.cjs', 'pr-files.test.cjs', 'branches.test.cjs']
+const tests = ['nav.test.cjs', 'pulls.test.cjs', 'pulls-overflow.test.cjs', 'deploy.test.cjs', 'settings.test.cjs', 'pr-files.test.cjs', 'branches.test.cjs', 'logs.test.cjs']
 const PORT = process.env.TEST_PORT || 5299
 const root = path.join(__dirname, '..')
 

@@ -261,3 +261,12 @@ button:disabled { cursor: not-allowed; }
 .sync-error { color: #cf222e; font-style: normal; }
 .pr-list-tabs { margin-bottom: 8px; }
 .pr-list { padding-top: 8px; }
+.log-section { max-width: none; }
+.log-row { display: flex; align-items: center; gap: 12px; padding: 7px 10px; border-radius: 6px; font-size: 13px; }
+.log-row:hover { background: #f6f8fa; }
+.log-row.error { background: #fff8f8; }
+.log-time, .log-duration { color: #57606a; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.log-time { width: 130px; }
+.log-project { flex: 0 0 110px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-endpoint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #57606a; }
+.log-error { flex: 0 1 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #cf222e; font-size: 12px; }

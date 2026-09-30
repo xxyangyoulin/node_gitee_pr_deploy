@@ -59,6 +59,14 @@ window.releaseConsole = {
   },
   refreshPulls: (projectId?: number) => request('/api/pulls/refresh', { method: 'POST', body: JSON.stringify({ projectId }) }),
   syncStatus: () => request('/api/sync/status'),
+  requestLogs: (query: { projectId?: number; status?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams()
+    if (query.projectId) params.set('projectId', String(query.projectId))
+    if (query.status && query.status !== 'all') params.set('status', query.status)
+    if (query.limit) params.set('limit', String(query.limit))
+    const queryString = params.toString()
+    return request(`/api/request-logs${queryString ? `?${queryString}` : ''}`)
+  },
   toggleSync: (projectId: number, enabled: boolean) => request('/api/sync/toggle', { method: 'POST', body: JSON.stringify({ projectId, enabled }) }),
   pullRequestDetail: (input) => request('/api/gitee/pull-detail', { method: 'POST', body: JSON.stringify(input) }),
   pullRequestLogs: (input) => request('/api/gitee/pull-logs', { method: 'POST', body: JSON.stringify(input) }),
