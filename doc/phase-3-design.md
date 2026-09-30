@@ -12,9 +12,9 @@
 | server_mode | `ssh` | `local` / `ssh` |
 | host / username | 空 | ssh 模式;编辑时下拉建议取自 deploy_targets 去重列表 |
 | workdir_template | `~/TEST/{project}_{pr}` | 测试项目位置,支持 `{project}` `{pr}` 变量 |
-| command | `vendor/bin/phpunit tests` | 测试命令 |
-| ai_decides | 0 | 开启后由 AI 生成测试命令 |
-| ai_prompt | 空(内置默认) | AI 决定命令的提示词,变量同评估提示词 |
+| commands | 预定义选项 JSON 数组 | 如 `[{"label":"全量","command":"vendor/bin/phpunit tests"},{"label":"单元","command":"vendor/bin/phpunit tests/Unit"}]`,至少一条;第一条为默认 |
+| ai_decides | 0 | 开启后由 AI 根据变更从选项中选择 |
+| ai_prompt | 空(内置默认) | AI 选择命令的提示词,变量同评估提示词 |
 | timeout_sec | 600 | 单次执行超时 |
 | created_at / updated_at | | |
 
@@ -31,7 +31,7 @@ runTest(project, prRow, config, { manual }) →
      [目录不存在] git clone https://oauth2:{token}@gitee.com/{repo}.git .
      git fetch --all --prune
      git checkout -f {head_sha}        ← 用 SHA 而非分支名(分支可能已删/被覆盖)
-     {command}                          ← ai_decides 时先调 AI 生成,失败回退默认命令
+     {command}                          ← ai_decides 时由 AI 从预定义选项中选择(返回序号),失败/越界回退第一个选项
   3. 执行:ssh 模式 spawn ssh(BatchMode);local 模式 spawn bash -lc
      - 流式输出(复用部署的 chunked 机制)
      - 超时 timeout_sec 强制 kill,记为失败"执行超时"
@@ -42,8 +42,9 @@ runTest(project, prRow, config, { manual }) →
 
 并发控制:同项目同时只跑一个测试(执行器内按 projectId 锁);全局并发 2。
 
-AI 生成命令的安全边界:AI 输出仅填入 command 字段(单行 shell),提示词约束"仅输出
-JSON {\"command\": ...}",解析失败/超时回退默认命令并在日志中标注"AI 生成失败,使用默认命令"。
+AI 选择命令的安全边界:AI 仅输出选项序号(JSON {"command_index": N}),命令本体全部
+来自用户预定义列表——不存在自由生成 shell 的注入面。序号越界/解析失败/超时回退第一个
+选项,日志标注"AI 选择失败,使用默认"。
 
 ## 3. 自动触发链(poller 内嵌)
 
@@ -69,7 +70,7 @@ state='testing' 时返回 409"测试进行中"。
 ## 5. 前端
 
 - **部署页**:项目分组头部加「测试配置」按钮 → 弹窗(服务器模式 local/ssh、
-  IP/用户建议下拉、位置模板、命令、AI 决定开关 + 提示词、超时)
+  IP/用户建议下拉、位置模板、**命令选项列表(可增删,首条为默认)**、AI 选择开关 + 提示词、超时)
 - **自动化面板测试行**:「发起测试」按钮点亮;state=testing 显示"运行中…";
   完成显示 ✓通过/✗失败 + 「查看日志」(弹窗展示该次输出,复用部署日志样式)
 - **部署历史**:增加类型列(部署/测试),测试行显示 PR 号
@@ -80,7 +81,7 @@ state='testing' 时返回 409"测试进行中"。
 - 单测(mock spawn/fetch):
   - 命令序列组装(clone 条件/fetch/checkout SHA/命令)
   - local 与 ssh 模式;超时 kill;非零退出码失败
-  - AI 生成命令成功替换、失败回退默认
+  - AI 选择命令:命中选项序号替换、越界/失败回退第一个选项
   - testing 状态互斥;自动触发受开关控制;每轮限量
 - UI 测试:测试配置弹窗、发起测试流、面板状态流转、历史类型筛选
 - 验收:配置真实测试服务器后,标记 needs_test 的 PR 在一轮内自动执行并回写状态
