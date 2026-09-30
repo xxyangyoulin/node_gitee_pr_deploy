@@ -83,11 +83,13 @@ function buildScript(database: DatabaseSync, context: TestContext, config: TestC
     const deployRow = database.prepare('SELECT remote_path FROM deploy_targets WHERE project_id=? ORDER BY position, id LIMIT 1').get(config.project_id) as any
     if (deployRow?.remote_path) source = deployRow.remote_path.replace(/^~(?=\/|$)/, homedir())
   }
+  const init = source ? `if [ ! -e ${shellQuote(workdir)}/.git ]; then cp -a ${shellQuote(source)}/. ${shellQuote(workdir)}/; fi` : ''
   const steps = [`mkdir -p ${shellQuote(workdir)}`]
-  if (source) steps.push(`cp -a ${shellQuote(source)}/. ${shellQuote(workdir)}/`)
+  if (init) steps.push(init)
   steps.push(
     `cd ${shellQuote(workdir)}`,
     'git fetch --all --prune',
+    'git clean -fd',
     `git checkout -f ${shellQuote(context.pr.head_sha || 'HEAD')}`,
     command,
   )
