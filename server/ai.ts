@@ -65,6 +65,23 @@ export function parseVerdict(text: string): AiVerdict | null {
   } catch { return null }
 }
 
+export async function callModelJson(settings: AiSettings, prompt: string): Promise<any> {
+  const response = await fetch(`${settings.aiBaseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${settings.aiApiKey}` },
+    body: JSON.stringify({ model: settings.aiModel, messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' }, temperature: 0 }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  const text = await response.text()
+  if (!response.ok) throw new Error(`AI ${response.status}: ${text.slice(0, 300)}`)
+  let body: any
+  try { body = JSON.parse(text) } catch { throw new Error('AI 返回非 JSON') }
+  const content = String(body?.choices?.[0]?.message?.content ?? '')
+  const match = content.match(/\{[\s\S]*\}/)
+  if (!match) throw new Error('AI 输出无法解析为 JSON')
+  return JSON.parse(match[0])
+}
+
 export async function callModel(settings: AiSettings, prompt: string): Promise<AiVerdict> {
   const response = await fetch(`${settings.aiBaseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',

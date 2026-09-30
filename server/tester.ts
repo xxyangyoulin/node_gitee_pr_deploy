@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
-import { buildEvaluationInput, callModel, renderPrompt, type AiSettings } from './ai.js'
+import { buildEvaluationInput, callModelJson, renderPrompt, type AiSettings } from './ai.js'
 
 export type TestCommandOption = { label: string; command: string }
 
@@ -54,8 +54,8 @@ async function pickCommand(database: DatabaseSync, config: TestConfig, context: 
   const optionsText = options.map((option, index) => `${index}. ${option.label} — ${option.command}`).join('\n')
   const prompt = renderPrompt(config.ai_prompt || DEFAULT_TEST_PROMPT, { title: context.pr.title, body: context.pr.body, files: optionsText, diff: input.diff })
   try {
-    const verdict = await callModel(aiSettings, prompt)
-    const index = Number((verdict as any).command_index)
+    const parsed = await callModelJson(aiSettings, prompt)
+    const index = Number(parsed.command_index)
     if (Number.isInteger(index) && index >= 0 && index < options.length) return { option: options[index], note: `AI 选择:${options[index].label}` }
     return { option: options[0], note: `AI 选择越界,使用默认:${options[0].label}` }
   } catch (error) {
@@ -95,8 +95,9 @@ export function runTest(database: DatabaseSync, config: TestConfig, context: Tes
   projectLocks.add(context.project.id)
   globalRunning += 1
   const promise = (async () => {
+    try {
     const startedAt = new Date().toISOString().replace('T', ' ').slice(0, 19)
-    const insert = database.prepare("INSERT INTO deployment_logs(project_id,project_name,target_name,host,kind,pr_number,output,success,created_at) VALUES(?,?,?,?, 'test',?,?,?,?,?)")
+    const insert = database.prepare("INSERT INTO deployment_logs(project_id,project_name,target_name,host,kind,pr_number,output,success,created_at) VALUES(?,?,?,?,'test',?,?,?,?)")
       .run(context.project.id, context.project.name, `PR#${context.pr.number} 测试`, config.server_mode === 'local' ? 'local' : `${config.username}@${config.host}`, context.pr.number, '', 0, startedAt) as any
     const logId = Number(insert.lastInsertRowid)
     let output = ''
@@ -116,6 +117,11 @@ export function runTest(database: DatabaseSync, config: TestConfig, context: Tes
       projectLocks.delete(context.project.id)
       globalRunning -= 1
     }
+    } catch (error) {
+      projectLocks.delete(context.project.id)
+      globalRunning -= 1
+      throw error
+    }
   })()
   return { promise }
 }
@@ -126,7 +132,8 @@ function updatePrState(database: DatabaseSync, context: TestContext, state: stri
 
 function execute(config: TestConfig, script: string, onChunk: (text: string) => void): Promise<number | 'timeout'> {
   return new Promise((resolve) => {
-    const args = config.server_mode === 'local' ? ['-lc', script] : ['-o', 'BatchMode=yes', `${config.username}@${config.host}`, script]
+    const hardened = `export GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true; ${script}`
+    const args = config.server_mode === 'local' ? ['-lc', hardened] : ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4', `${config.username}@${config.host}`, hardened]
     const child = spawn(config.server_mode === 'local' ? 'bash' : 'ssh', args)
     let settled = false
     const timer = setTimeout(() => {

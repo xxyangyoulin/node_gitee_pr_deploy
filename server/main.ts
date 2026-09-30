@@ -24,6 +24,7 @@ try { database.exec('ALTER TABLE deployment_logs ADD COLUMN kind TEXT NOT NULL D
 try { database.exec('ALTER TABLE deployment_logs ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_result TEXT NOT NULL DEFAULT ""') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_evaluated_at TEXT NOT NULL DEFAULT ""') } catch { }
+database.exec("UPDATE pr_cache SET state='needs_test', status_note='服务重启,测试中断,可重新发起' WHERE state='testing'")
 database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL DEFAULT 0, project_name TEXT NOT NULL DEFAULT "", endpoint TEXT NOT NULL DEFAULT "", method TEXT NOT NULL DEFAULT "GET", ok INTEGER NOT NULL DEFAULT 1, status INTEGER NOT NULL DEFAULT 0, error_message TEXT NOT NULL DEFAULT "", duration_ms INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
 {
   const targetCount = (database.prepare('SELECT COUNT(*) AS c FROM deploy_targets').get() as any).c
@@ -177,7 +178,11 @@ async function api(request: import('node:http').IncomingMessage, response: impor
     database.prepare("UPDATE pr_cache SET state='testing' WHERE project_id=? AND number=?").run(projectId, number)
     response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' })
     const handle = runTest(database, config as TestConfig, { project: { id: prRow.id, name: prRow.name, repository: prRow.repository, token: prRow.token }, pr: { number: prRow.number, title: prRow.title, body: prRow.body, head_sha: prRow.headSha } }, (text) => response.write(text))
-    handle.promise.then(() => response.end()).catch((error) => { response.write(`\n[错误] ${error instanceof Error ? error.message : '执行失败'}`); response.end() })
+    handle.promise.then(() => response.end()).catch((error) => {
+      database.prepare("UPDATE pr_cache SET state='needs_test' WHERE project_id=? AND number=? AND state='testing'").run(projectId, number)
+      response.write(`\n[错误] ${error instanceof Error ? error.message : '执行失败'}`)
+      response.end()
+    })
     return
   }
   if (path === '/api/pr/evaluate' && request.method === 'POST') {
