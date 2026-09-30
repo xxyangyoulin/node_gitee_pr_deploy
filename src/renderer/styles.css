@@ -259,3 +259,5 @@ button:disabled { cursor: not-allowed; }
 .state-badge.st-closed { background: #eaeef2; color: #8c959f; }
 .sync-project-list { display: flex; flex-direction: column; margin-bottom: 6px; }
 .sync-error { color: #cf222e; font-style: normal; }
+.pr-list-tabs { margin-bottom: 8px; }
+.pr-list { padding-top: 8px; }

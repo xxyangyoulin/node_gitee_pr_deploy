@@ -105,7 +105,7 @@ async function api(request: import('node:http').IncomingMessage, response: impor
       : database.prepare('SELECT c.*, p.name AS projectName, p.repository, p.token FROM pr_cache c JOIN projects p ON p.id=c.project_id ORDER BY c.gitee_updated_at DESC').all()
     return json(response, 200, rows.map((row: any) => ({
       projectId: row.project_id,
-      projectName: row.project_name,
+      projectName: row.projectName,
       repository: row.repository,
       token: row.token,
       number: row.number,

@@ -34,9 +34,13 @@ function check(name, cond) {
     if (path === '/api/projects') return route.fulfill({ json: PROJECTS })
     if (path === '/api/settings') return route.fulfill({ json: { prHead: 'dock', prBase: 'master', mergeMethod: 'merge' } })
     if (path === '/api/pulls') {
-      const open = [...PRS_ONE, ...PRS_TWO].filter((pull) => !mergedNumbers.includes(pull.number) && pull.state !== 'merged')
-      return route.fulfill({ json: open.flatMap((pull) => {
-        const isOne = PRS_ONE.includes(pull)
+      const open = [...PRS_ONE, ...PRS_TWO].filter((pull) => !mergedNumbers.includes(pull.number))
+      const ended = [
+        { number: 5, title: 'old feature', state: 'merged', user: { name: 'erin' }, head: { ref: 'feat-old' }, base: { ref: 'master' }, created_at: '2026-09-10T08:00:00+08:00', __project: 1 },
+        { number: 6, title: 'abandoned', state: 'closed', user: { name: 'frank' }, head: { ref: 'wip' }, base: { ref: 'master' }, created_at: '2026-09-11T08:00:00+08:00', __project: 2 },
+      ]
+      return route.fulfill({ json: [...open, ...ended].flatMap((pull) => {
+        const isOne = pull.__project ? pull.__project === 1 : PRS_ONE.includes(pull)
         return [{
           projectId: isOne ? 1 : 2,
           projectName: isOne ? 'proj-one' : 'proj-two',
@@ -125,6 +129,16 @@ function check(name, cond) {
   await page.locator('.filter-select .dropdown-toggle').click()
   await page.locator('.dropdown-menu button', { hasText: '全部项目' }).click()
   await page.waitForTimeout(100)
+
+  // 分组 tab:默认进行中(不含已结束),可切换已结束
+  check('默认进行中 tab 不含已结束 PR', (await page.locator('.pr-item', { hasText: '#5' }).count()) === 0 && (await page.locator('.pr-item').count()) === 4)
+  await page.locator('.pr-list-tabs button', { hasText: '已结束' }).click()
+  await page.waitForTimeout(100)
+  check('已结束 tab 展示历史 PR', (await page.locator('.pr-item').count()) === 2 && (await page.locator('.pr-item', { hasText: 'old feature' }).count()) === 1)
+  check('已结束徽章标注', (await page.locator('.pr-item', { hasText: 'old feature' }).locator('.state-badge').textContent()) === '已合并')
+  await page.locator('.pr-list-tabs button', { hasText: '进行中' }).click()
+  await page.waitForTimeout(100)
+  check('切回进行中恢复', (await page.locator('.pr-item').count()) === 4)
 
   // 选中 非 dock→dock 的 PR:显示一键 master
   await page.locator('.pr-item').first().click()
