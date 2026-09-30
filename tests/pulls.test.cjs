@@ -129,6 +129,7 @@ function check(name, cond) {
   check('审查+测试覆盖两个 PR(重试合法重复)', JSON.stringify([...new Set(saved.approves.map((item) => item.number))].sort((a, b) => a - b)) === JSON.stringify([13, 14]) && saved.approves.at(-1)?.number === 14 && saved.tests.at(-1)?.number === 14)
   check('弹窗内显示部署日志', (await page.locator('.one-click-modal .deploy-output').textContent()).includes('[部署完成]'))
   check('弹窗显示部署目标(项目2 web-2)', (await page.locator('.deploy-target-info').first().textContent()).includes('web-2'))
+  check('弹窗显示将执行的完整命令', (await page.locator('.deploy-target-info').nth(1).textContent()).includes('cd /srv/two && ./deploy.sh'))
   check('弹窗显示上次部署记录(重试后为最新一次)', (await page.locator('.deploy-target-info').last().textContent()).includes('2026-09-28 12:00:00'))
   await page.locator('.one-click-modal button', { hasText: '关闭' }).click()
   check('关闭进度弹窗', (await page.locator('.one-click-modal').count()) === 0)
@@ -151,7 +152,7 @@ function check(name, cond) {
   check('部署已执行', saved.runs.at(-1) === 11)
   check('进度弹窗 2 步全部完成', (await page.locator('.progress-steps li.done').count()) === 2)
   check('弹窗显示部署日志', (await page.locator('.one-click-modal .deploy-output').textContent()).includes('[部署完成]'))
-  check('弹窗显示部署目标(项目1)', (await page.locator('.deploy-target-info').textContent()).includes('/srv/one'))
+  check('弹窗显示部署目标(项目1)', (await page.locator('.deploy-target-info').first().textContent()).includes('/srv/one'))
   await page.locator('.one-click-modal button', { hasText: '关闭' }).click()
 
   // 普通 PR 两击合并(确认超时还原)

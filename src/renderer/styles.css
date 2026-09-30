@@ -244,3 +244,8 @@ button:disabled { cursor: not-allowed; }
 .history-toolbar { margin-bottom: 8px; }
 .history-filter { min-width: 180px; }
 .deploy-target-row .move-btn { padding: 4px 8px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: #57606a; }
+.pr-description { border-bottom: 1px solid #d0d7de; }
+.pr-description-toggle { display: block; width: 100%; padding: 8px 14px; border: 0; background: #f6f8fa; text-align: left; font-size: 13px; font-weight: 600; color: #57606a; }
+.pr-description-toggle:hover { background: #eef1f4; }
+.pr-description-body { margin: 0; padding: 10px 16px 14px; max-height: 220px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.55; color: #1f2328; background: #fff; }
+.deploy-command-line { word-break: break-all; }

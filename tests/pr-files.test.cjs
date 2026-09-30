@@ -20,6 +20,7 @@ function check(name, cond) {
     const path = new URL(req.url()).pathname
     if (path === '/api/projects') return route.fulfill({ json: PROJECTS })
     if (path === '/api/gitee/pulls') return route.fulfill({ json: [{ number: 7, title: 'fake pr', head: { ref: 'dock' }, base: { ref: 'master' } }] })
+    if (path === '/api/gitee/pull-detail') return route.fulfill({ json: { number: 7, title: 'fake pr', body: '本次变更说明：\n1. 新增用户表字段\n2. 修复登录超时' } })
     if (path === '/api/gitee/pull-logs') return route.fulfill({ json: [] })
     if (path === '/api/gitee/pull-files') return route.fulfill({ json: FILES })
     if (path === '/api/gitee/pull-commits') return route.fulfill({ json: [
@@ -59,6 +60,16 @@ function check(name, cond) {
   await page.waitForTimeout(500)
   console.log('active 行实际内容:', JSON.stringify(await page.locator('.file-item.active .file-name').allTextContents()), '| 行数:', await page.locator('.file-item.active').count())
   check('点击文件行高亮', (await page.locator('.file-item.active .file-name').textContent()) === 'file6.ts')
+
+  // PR 描述折叠面板
+  const descToggle = page.locator('.pr-description-toggle')
+  check('描述面板默认收起', (await page.locator('.pr-description-body').count()) === 0)
+  await descToggle.click()
+  await page.waitForTimeout(100)
+  check('展开显示 PR 描述', (await page.locator('.pr-description-body').textContent()).includes('修复登录超时'))
+  await descToggle.click()
+  await page.waitForTimeout(100)
+  check('再次点击收起', (await page.locator('.pr-description-body').count()) === 0)
 
   // 工具栏
   check('工具栏显示 7 个文件', (await page.locator('.files-toolbar span').first().textContent()) === '7 个文件')

@@ -27,6 +27,17 @@ function switchPage(page: string) {
   if (location.hash !== `#/${page}`) location.hash = `#/${page}`
 }
 window.addEventListener('hashchange', () => { activePage.value = pageFromHash() })
+window.addEventListener('focus', () => {
+  if (activePage.value === 'pulls' && !loadingPulls.value && !oneClickRun.value?.running) loadPulls()
+})
+
+function notifyDesktop(title: string, body: string) {
+  try {
+    if (!('Notification' in window)) return
+    if (Notification.permission === 'granted') new Notification(title, { body })
+    else if (Notification.permission !== 'denied') void Notification.requestPermission().then((permission) => { if (permission === 'granted') new Notification(title, { body }) })
+  } catch { }
+}
 
 const showProjectForm = ref(false)
 const projectName = ref('')
@@ -61,6 +72,8 @@ function locateFirstSql() {
   const index = files.value.findIndex((file) => isSqlFile(file.filename))
   if (index >= 0) jumpToFile(index)
 }
+const prDescription = ref('')
+const prDescriptionOpen = ref(false)
 const prFilesCache = ref<any[]>([])
 const viewingCommit = ref<any | null>(null)
 const commitLoading = ref(false)
@@ -86,7 +99,7 @@ type OneClickRun = {
   deployed: boolean
   deployedTargetIds: number[]
   lastDeploy: { createdAt: string; success: number } | null
-  deployTarget: { name: string; host: string; username: string; remotePath: string } | null
+  deployTarget: { name: string; host: string; username: string; remotePath: string; command: string } | null
   log: string
   failed: boolean
   running: boolean
@@ -561,10 +574,12 @@ async function runTargetDeployment(row: DeploymentRow) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '部署失败'
     deployLog.value.output += (deployLog.value.output ? '\n' : '') + message
+    notifyDesktop('部署失败', `${row.projectName} · ${row.name || row.host}`)
   } finally {
     deployLog.value.running = false
     loadDeployHistory()
   }
+  if (deployLog.value.output.includes('[部署完成]')) notifyDesktop('部署完成', `${row.projectName} · ${row.name || row.host}`)
 }
 
 async function runGroupDeployment(group: DeployGroup) {
@@ -582,10 +597,12 @@ async function runGroupDeployment(group: DeployGroup) {
       } catch (error) {
         const message = error instanceof Error ? error.message : '部署失败'
         deployLog.value.output += `\n[部署失败] ${target.name || target.host}：${message}\n[后续目标已跳过]`
+        notifyDesktop('部署失败', `${group.project.name} · ${target.name || target.host}（后续目标已跳过）`)
         return
       }
     }
     deployLog.value.output += '\n[全部部署完成]'
+    notifyDesktop('部署完成', `${group.project.name} · ${targets.length} 个目标全部成功`)
   } finally {
     deployLog.value.running = false
     loadDeployHistory()
@@ -620,6 +637,8 @@ function clearSelection() {
   resetMergeConfirm()
   resetOneClickConfirm()
   selectedPull.value = null
+  prDescription.value = ''
+  prDescriptionOpen.value = false
   files.value = []
   commits.value = []
   prFilesCache.value = []
@@ -659,7 +678,8 @@ async function openPull(item: PullItem, seq: number) {
   errorMessage.value = ''
   try {
     const stale = () => seq !== selectionSeq || selectedPull.value !== item
-    await window.releaseConsole.pullRequestDetail({ repository: project.repository, token: project.token, number: Number(pull.number) })
+    const detail = await window.releaseConsole.pullRequestDetail({ repository: project.repository, token: project.token, number: Number(pull.number) })
+    prDescription.value = String(detail?.body ?? '').trim()
     const logs = await window.releaseConsole.pullRequestLogs({ repository: project.repository, token: project.token, number: Number(pull.number) })
     if (stale()) return
     const logText = (log: any) => `${log.content || ''} ${log.action_type || ''} ${log.after_change_value || ''}`.toLowerCase()
@@ -760,7 +780,7 @@ async function runDeployStage(run: OneClickRun) {
   if (!targets.length) throw new Error(`项目 ${run.project.name} 未配置部署目标，无法执行部署`)
   for (const target of targets) {
     if (run.deployedTargetIds.includes(target.id)) continue
-    run.deployTarget = { name: target.name || target.host, host: target.host, username: target.username, remotePath: target.remotePath }
+    run.deployTarget = { name: target.name || target.host, host: target.host, username: target.username, remotePath: target.remotePath, command: target.command }
     run.log += `\n==> [${target.name || target.host}] ${target.username}@${target.host}\n`
     try {
       await window.releaseConsole.runDeployment(target.id, (text) => {
@@ -807,10 +827,13 @@ async function runOneClick() {
       run.deployed = true
     }
     mergeMessage.value = run.withDeploy ? '一键部署完成' : '一键合并完成'
+    if (run.withDeploy) notifyDesktop('一键部署完成', `${run.project.name} 全流程成功`)
     await loadPulls()
   } catch (error) {
     run.failed = true
-    mergeMessage.value = error instanceof Error ? error.message : '一键操作失败'
+    const message = error instanceof Error ? error.message : '一键操作失败'
+    mergeMessage.value = message
+    notifyDesktop(run.withDeploy ? '一键部署失败' : '一键合并失败', `${run.project.name}：${message}`)
   } finally {
     run.running = false
     loadDeployHistory()
@@ -1029,7 +1052,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             <div v-if="pullLoadErrors.length" class="load-warning">部分项目 PR 加载失败：{{ pullLoadErrors.join('；') }}</div>
             <div class="pr-workspace">
             <aside class="pr-list"><div v-if="!filteredPulls.length && !loadingPulls" class="list-empty">没有开放 PR</div><button v-for="item in filteredPulls" :key="`${item.project.id}-${item.pull.number}`" :class="['pr-item', { selected: isSelected(item) }]" @click="selectPull(item)"><span class="project-badge" :title="item.project.repository">{{ item.project.name }}</span><strong>#{{ item.pull.number }} {{ item.pull.title }}</strong><span>{{ authorOf(item.pull) }}</span><small class="pr-branches"><span class="branch-chip branch-head" :class="{ 'branch-main': isMainBranch(item.pull.head?.ref || item.pull.head?.label) }" :title="item.pull.head?.label || item.pull.head?.ref">{{ item.pull.head?.ref || item.pull.head?.label || '?' }}</span><span class="branch-arrow">→</span><span class="branch-chip branch-base" :class="{ 'branch-main': isMainBranch(item.pull.base?.ref || item.pull.base?.label) }" :title="item.pull.base?.label || item.pull.base?.ref">{{ item.pull.base?.ref || item.pull.base?.label || '?' }}</span></small><small class="pr-time">{{ formatTime(item.pull.created_at) }}</small></button></aside>
-            <section class="code-panel" :class="{ 'has-list': files.length > 0 && !loadingFiles }" :style="files.length > 0 && !loadingFiles ? { gridTemplateColumns: `${fileListWidth}px 5px minmax(0, 1fr)` } : undefined"><aside v-if="files.length > 0 && !loadingFiles" class="file-list"><div class="sidebar-tabs"><button :class="{ active: sidebarTab === 'files' }" class="files-tab" @click="sidebarTab = 'files'">文件<span v-if="sqlFiles.length" class="sql-dot"></span></button><button :class="{ active: sidebarTab === 'commits' }" @click="sidebarTab = 'commits'">提交记录</button></div><div class="file-list-scroll"><template v-if="sidebarTab === 'files'"><button v-for="row in fileTreeRows" :key="row.type + ':' + row.key" :class="['file-item', { dir: row.type === 'dir', active: row.type === 'file' && row.index === activeFileIndex, sql: row.type === 'file' && isSqlFile(row.key) }]" :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }" :title="row.key" @click="row.type === 'dir' ? toggleDir(row.key) : jumpToFile(row.index)"><span v-if="row.type === 'dir'" class="file-toggle">{{ isDirExpanded(row.key) || fileQuery.trim() ? '▾' : '▸' }}</span><span class="file-name">{{ row.name }}</span><span v-if="row.type === 'file' && isSqlFile(row.key)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ row.added }}</span><span class="stat-removed">-{{ row.removed }}</span></span></button></template><template v-else><button v-for="commit in commits" :key="commit.sha" :class="['commit-item', { active: viewingCommit?.sha === commit.sha }]" :title="firstLine(commit.commit?.message)" @click="selectCommit(commit)"><span class="commit-message">{{ firstLine(commit.commit?.message) }}</span><span class="commit-meta"><span>{{ commit.commit?.author?.name || '未知提交人' }}</span><span class="commit-sha" title="点击复制 SHA" @click.stop="copyCommitSha(commit)">{{ shortSha(commit.sha) }}</span><span class="history-time">{{ formatTime(commit.commit?.author?.date) }}</span></span></button><div v-if="!commits.length" class="settings-empty">暂无提交记录</div></template></div></aside><div v-if="files.length > 0 && !loadingFiles" class="resize-handle" @mousedown="startResize"></div><div class="files-main"><div v-if="loadingFiles" class="empty-state loading-state"><LoadingAnim /><p>加载文件中…</p></div><div v-else-if="commitLoading" class="empty-state loading-state"><LoadingAnim /><p>加载提交内容…</p></div><div v-else-if="!selectedPull" class="empty-state">选择一个 PR 查看变更与操作</div><div v-else-if="!files.length" class="empty-state">该 PR 没有可展示的文件</div><template v-else><div class="files-toolbar"><span v-if="viewingCommit" class="commit-viewing">正在查看提交 <span class="commit-sha">{{ shortSha(viewingCommit.sha) }}</span> · {{ files.length }} 个文件<button type="button" class="commit-back" @click="exitCommitView">← 返回 PR 文件</button></span><span v-else>{{ fileQuery.trim() ? `${matchedCount}/${files.length} 个文件` : `${files.length} 个文件` }}</span><span class="toolbar-stats"><span class="stat-added">+{{ totalStats.added }}</span><span class="stat-removed">-{{ totalStats.removed }}</span></span><span class="toolbar-spacer"></span><input v-model="fileQuery" class="file-search" placeholder="搜索文件名" /><button @click="setAllFilesExpanded(true)">全部展开</button><button @click="setAllFilesExpanded(false)">全部收起</button></div><div ref="filesScrollEl" class="files-scroll" @scroll="onFilesScroll"><div v-for="(file, index) in files" :id="`pr-file-card-${index}`" :key="file.filename" v-show="fileMatches(file.filename)" :data-index="index" class="file-card"><button class="file-card-header" :class="{ 'sql-card': isSqlFile(file.filename) }" @click="toggleFile(file.filename)"><span class="file-toggle">{{ isFileExpanded(file.filename) ? '▾' : '▸' }}</span><span class="file-name" :title="file.filename">{{ file.filename }}</span><span v-if="isSqlFile(file.filename)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ fileStats[index]?.added ?? 0 }}</span><span class="stat-removed">-{{ fileStats[index]?.removed ?? 0 }}</span></span><span class="copy-btn" title="复制 diff" @click.stop="copyPatch(file)">复制</span><span class="copy-btn full-toggle" :class="{ active: isFullFileView(file.filename) }" title="查看完整文件 / 切回 diff" @click.stop="toggleFullFile(file)">{{ isFullFileView(file.filename) ? '返回 diff' : '完整文件' }}</span></button><pre v-if="isFileExpanded(file.filename) && isFullFileView(file.filename)" class="code-view file-diff full-file">{{ fullFileLoading[file.filename] ? '加载中…' : fullFileContents[file.filename] || '无法加载文件内容' }}</pre><pre v-else-if="isFileExpanded(file.filename)" class="code-view file-diff"><code><span v-for="(line, lineIndex) in fileDiffs[index]" :key="lineIndex" :class="['code-line', `line-${line.kind}`]"><span class="line-prefix">{{ line.prefix }}</span><span v-html="line.html"></span></span></code></pre></div></div></template></div></section>
+            <section class="code-panel" :class="{ 'has-list': files.length > 0 && !loadingFiles }" :style="files.length > 0 && !loadingFiles ? { gridTemplateColumns: `${fileListWidth}px 5px minmax(0, 1fr)` } : undefined"><aside v-if="files.length > 0 && !loadingFiles" class="file-list"><div class="sidebar-tabs"><button :class="{ active: sidebarTab === 'files' }" class="files-tab" @click="sidebarTab = 'files'">文件<span v-if="sqlFiles.length" class="sql-dot"></span></button><button :class="{ active: sidebarTab === 'commits' }" @click="sidebarTab = 'commits'">提交记录</button></div><div class="file-list-scroll"><template v-if="sidebarTab === 'files'"><button v-for="row in fileTreeRows" :key="row.type + ':' + row.key" :class="['file-item', { dir: row.type === 'dir', active: row.type === 'file' && row.index === activeFileIndex, sql: row.type === 'file' && isSqlFile(row.key) }]" :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }" :title="row.key" @click="row.type === 'dir' ? toggleDir(row.key) : jumpToFile(row.index)"><span v-if="row.type === 'dir'" class="file-toggle">{{ isDirExpanded(row.key) || fileQuery.trim() ? '▾' : '▸' }}</span><span class="file-name">{{ row.name }}</span><span v-if="row.type === 'file' && isSqlFile(row.key)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ row.added }}</span><span class="stat-removed">-{{ row.removed }}</span></span></button></template><template v-else><button v-for="commit in commits" :key="commit.sha" :class="['commit-item', { active: viewingCommit?.sha === commit.sha }]" :title="firstLine(commit.commit?.message)" @click="selectCommit(commit)"><span class="commit-message">{{ firstLine(commit.commit?.message) }}</span><span class="commit-meta"><span>{{ commit.commit?.author?.name || '未知提交人' }}</span><span class="commit-sha" title="点击复制 SHA" @click.stop="copyCommitSha(commit)">{{ shortSha(commit.sha) }}</span><span class="history-time">{{ formatTime(commit.commit?.author?.date) }}</span></span></button><div v-if="!commits.length" class="settings-empty">暂无提交记录</div></template></div></aside><div v-if="files.length > 0 && !loadingFiles" class="resize-handle" @mousedown="startResize"></div><div class="files-main"><div v-if="loadingFiles" class="empty-state loading-state"><LoadingAnim /><p>加载文件中…</p></div><div v-else-if="commitLoading" class="empty-state loading-state"><LoadingAnim /><p>加载提交内容…</p></div><div v-else-if="!selectedPull" class="empty-state">选择一个 PR 查看变更与操作</div><div v-else-if="!files.length" class="empty-state">该 PR 没有可展示的文件</div><template v-else><div v-if="prDescription" class="pr-description" :class="{ open: prDescriptionOpen }"><button class="pr-description-toggle" type="button" @click="prDescriptionOpen = !prDescriptionOpen">{{ prDescriptionOpen ? '▾' : '▸' }} PR 描述</button><pre v-if="prDescriptionOpen" class="pr-description-body">{{ prDescription }}</pre></div><div class="files-toolbar"><span v-if="viewingCommit" class="commit-viewing">正在查看提交 <span class="commit-sha">{{ shortSha(viewingCommit.sha) }}</span> · {{ files.length }} 个文件<button type="button" class="commit-back" @click="exitCommitView">← 返回 PR 文件</button></span><span v-else>{{ fileQuery.trim() ? `${matchedCount}/${files.length} 个文件` : `${files.length} 个文件` }}</span><span class="toolbar-stats"><span class="stat-added">+{{ totalStats.added }}</span><span class="stat-removed">-{{ totalStats.removed }}</span></span><span class="toolbar-spacer"></span><input v-model="fileQuery" class="file-search" placeholder="搜索文件名" /><button @click="setAllFilesExpanded(true)">全部展开</button><button @click="setAllFilesExpanded(false)">全部收起</button></div><div ref="filesScrollEl" class="files-scroll" @scroll="onFilesScroll"><div v-for="(file, index) in files" :id="`pr-file-card-${index}`" :key="file.filename" v-show="fileMatches(file.filename)" :data-index="index" class="file-card"><button class="file-card-header" :class="{ 'sql-card': isSqlFile(file.filename) }" @click="toggleFile(file.filename)"><span class="file-toggle">{{ isFileExpanded(file.filename) ? '▾' : '▸' }}</span><span class="file-name" :title="file.filename">{{ file.filename }}</span><span v-if="isSqlFile(file.filename)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ fileStats[index]?.added ?? 0 }}</span><span class="stat-removed">-{{ fileStats[index]?.removed ?? 0 }}</span></span><span class="copy-btn" title="复制 diff" @click.stop="copyPatch(file)">复制</span><span class="copy-btn full-toggle" :class="{ active: isFullFileView(file.filename) }" title="查看完整文件 / 切回 diff" @click.stop="toggleFullFile(file)">{{ isFullFileView(file.filename) ? '返回 diff' : '完整文件' }}</span></button><pre v-if="isFileExpanded(file.filename) && isFullFileView(file.filename)" class="code-view file-diff full-file">{{ fullFileLoading[file.filename] ? '加载中…' : fullFileContents[file.filename] || '无法加载文件内容' }}</pre><pre v-else-if="isFileExpanded(file.filename)" class="code-view file-diff"><code><span v-for="(line, lineIndex) in fileDiffs[index]" :key="lineIndex" :class="['code-line', `line-${line.kind}`]"><span class="line-prefix">{{ line.prefix }}</span><span v-html="line.html"></span></span></code></pre></div></div></template></div></section>
           </div>
           </template>
         </section>
@@ -1124,6 +1147,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           <li v-for="(step, index) in oneClickSteps" :key="index" :class="step.state"><span class="step-dot">{{ step.state === 'done' ? '✓' : step.state === 'failed' ? '✗' : index + 1 }}</span>{{ step.label }}</li>
         </ol>
         <div v-if="oneClickRun.deployTarget" class="deploy-target-info">部署目标：<code>{{ oneClickRun.deployTarget.name || oneClickRun.deployTarget.host }}</code><span class="target-sep">·</span><code>{{ oneClickRun.deployTarget.username }}@{{ oneClickRun.deployTarget.host }}</code><span class="target-sep">·</span>远程目录：<code>{{ oneClickRun.deployTarget.remotePath }}</code></div>
+        <div v-if="oneClickRun.deployTarget" class="deploy-target-info">执行命令：<code class="deploy-command-line">ssh {{ oneClickRun.deployTarget.username }}@{{ oneClickRun.deployTarget.host }} 'cd {{ oneClickRun.deployTarget.remotePath }} && {{ oneClickRun.deployTarget.command }}'</code></div>
         <div v-if="oneClickRun.lastDeploy" class="deploy-target-info">上次部署：<code>{{ oneClickRun.lastDeploy.createdAt }}</code><span class="target-sep">·</span>结果：<code>{{ oneClickRun.lastDeploy.success ? '成功' : '失败' }}</code></div>
         <pre v-if="oneClickRun.withDeploy" ref="modalLogEl" class="deploy-output">{{ oneClickRun.log || '等待部署输出…' }}</pre>
         <div class="modal-actions"><button v-if="oneClickRun.failed" class="primary" :disabled="oneClickRun.running" @click="runOneClick()">重试</button><button :disabled="oneClickRun.running" @click="oneClickRun = null">{{ oneClickRun.running ? '执行中…' : '关闭' }}</button></div>
