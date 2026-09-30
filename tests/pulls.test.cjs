@@ -16,7 +16,7 @@ let createdNumber = 13
 let merge14Failed = false
 let target22Failed = false
 let projTwoPullsFail = false
-const deployLogs = [{ id: 1, projectId: 2, projectName: 'proj-two', host: 'deploy@a.com', output: 'old run', success: 1, createdAt: '2026-09-01 10:00:00' }]
+const deployLogs = [{ id: 1, projectId: 2, projectName: 'proj-two', targetName: 'PR#13 测试', kind: 'test', prNumber: 13, host: 'local', output: 'running...\n[测试通过]', aiSummary: '整体通过:全部用例成功。\n• 无失败项', success: 1, createdAt: '2026-09-30 12:00:00' }]
 let failures = 0
 
 function check(name, cond) {
@@ -63,7 +63,14 @@ function check(name, cond) {
       }) })
     }
     if (path === '/api/test/configs') return route.fulfill({ json: [{ project_id: 2, server_mode: 'ssh', host: 'a.com', username: 'deploy', workdir_template: '~/TEST/{project}_{pr}', commands: '[{"label":"全量","command":"vendor/bin/phpunit tests"}]', ai_decides: 0, ai_prompt: '', timeout_sec: 600, projectName: 'proj-two' }] })
-    if (path === '/api/test/run') { saved.testRuns.push(req.postDataJSON()); return route.fulfill({ json: 'running...\n[测试通过]' }) }
+    if (path === '/api/test/run') { saved.testRuns.push(req.postDataJSON()); deployLogs.unshift({ id: deployLogs.length + 1, projectId: 2, projectName: 'proj-two', targetName: 'PR#13 测试', kind: 'test', prNumber: 13, host: 'local', output: 'running...\n[测试通过]', aiSummary: '整体通过:全部用例成功。\n• 无失败项', success: 1, createdAt: '2026-09-30 13:00:00' }); return route.fulfill({ json: 'running...\n[测试通过]' }) }
+    if (path === '/api/deployment/run') {
+      const targetId = req.postDataJSON().targetId
+      saved.runs.push(targetId)
+      if (targetId === 22 && !target22Failed) { target22Failed = true; return route.fulfill({ status: 500, json: { message: 'mock 目标宕机' } }) }
+      deployLogs.unshift({ id: deployLogs.length + 1, projectId: 2, projectName: 'proj-two', targetName: targetId === 21 ? 'web-1' : 'web-2', kind: 'deploy', prNumber: 0, host: 'deploy@a.com', output: 'deploy out\n[部署完成]', aiSummary: '', success: 1, createdAt: '2026-09-28 12:00:00' })
+      return route.fulfill({ json: 'deploy out\n[部署完成]' })
+    }
     if (path === '/api/pr/evaluate') {
       const input = req.postDataJSON()
       saved.evaluates.push(input)
@@ -104,13 +111,6 @@ function check(name, cond) {
       const projectId = Number(url.searchParams.get('projectId')) || 0
       const rows = projectId ? deployLogs.filter((log) => log.projectId === projectId) : deployLogs
       return route.fulfill({ json: rows.slice(0, Number(url.searchParams.get('limit')) || 20).map((log) => ({ ...log })) })
-    }
-    if (path === '/api/deployment/run') {
-      const targetId = req.postDataJSON().targetId
-      saved.runs.push(targetId)
-      if (targetId === 22 && !target22Failed) { target22Failed = true; return route.fulfill({ status: 500, json: { message: 'mock 目标宕机' } }) }
-      deployLogs.unshift({ id: deployLogs.length + 1, projectId: 2, projectName: 'proj-two', targetName: targetId === 21 ? 'web-1' : 'web-2', host: 'deploy@a.com', output: 'deploy out\n[部署完成]', success: 1, createdAt: '2026-09-28 12:00:00' })
-      return route.fulfill({ json: 'deploy out\n[部署完成]' })
     }
     if (path === '/api/gitee/pull-logs') return route.fulfill({ json: [] })
     if (path === '/api/gitee/pull-files') return route.fulfill({ json: [] })
@@ -182,6 +182,7 @@ function check(name, cond) {
   check('测试请求发出', saved.testRuns.at(-1)?.projectId === 2 && saved.testRuns.at(-1)?.number === 13)
   check('测试输出展示', (await page.locator('.automation-test-output').textContent()).includes('[测试通过]'))
   check('状态更新为通过', (await page.locator('.automation-row').nth(1).textContent()).includes('✓ 通过'))
+  check('测试完成后显示 AI 汇总卡片', (await page.locator('.test-summary-card').textContent()).includes('整体通过'))
 
   // 手动重新评审
   await page.locator('.automation-row').first().locator('button', { hasText: '重新评审' }).click()

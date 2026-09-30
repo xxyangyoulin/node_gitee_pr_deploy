@@ -93,6 +93,7 @@ const testFormError = ref('')
 const savingTest = ref(false)
 const runningTest = ref(false)
 const testOutput = ref('')
+const testSummary = ref('')
 const testOutputEl = ref<HTMLElement | null>(null)
 
 function testConfigOf(projectId: number) {
@@ -169,6 +170,11 @@ async function runSelectedTest() {
     const success = testOutput.value.includes('[测试通过]')
     target.pull.state = success ? 'test_passed' : 'test_failed'
     mergeMessage.value = success ? '测试通过' : '测试失败'
+    try {
+      const logs = await window.releaseConsole.listDeploymentLogs({ projectId: target.project.id, limit: 5 })
+      const entry = logs.find((row) => row.kind === 'test' && row.prNumber === Number(target.pull.number))
+      testSummary.value = entry?.aiSummary ?? ''
+    } catch { }
   } catch (error) {
     target.pull.state = 'needs_test'
     mergeMessage.value = error instanceof Error ? error.message : '测试发起失败'
@@ -321,6 +327,7 @@ const deploymentGroups = computed<DeployGroup[]>(() => projects.value.map((proje
 const deployHistory = ref<Array<{ id: number; projectId: number; projectName: string; targetName: string; kind: string; prNumber: number; host: string; output: string; aiSummary: string; success: number; createdAt: string }>>([])
 const historyFilter = ref<number | 'all'>('all')
 const requestLogRows = ref<Array<{ id: number; projectId: number; projectName: string; endpoint: string; method: string; ok: number; status: number; errorMessage: string; durationMs: number; createdAt: string }>>([])
+const requestLogDetail = ref<{ projectName: string; endpoint: string; method: string; ok: number; status: number; errorMessage: string; durationMs: number; createdAt: string } | null>(null)
 const requestLogFilter = ref<number | 'all'>('all')
 const requestLogStatus = ref<'all' | 'ok' | 'error'>('all')
 const loadingRequestLogs = ref(false)
@@ -868,6 +875,14 @@ async function openPull(item: PullItem, seq: number) {
   commits.value = []
   sidebarTab.value = 'files'
   testOutput.value = ''
+  testSummary.value = ''
+  if (item.pull.state === 'test_passed' || item.pull.state === 'test_failed') {
+    try {
+      const logs = await window.releaseConsole.listDeploymentLogs({ projectId: item.project.id, limit: 10 })
+      const entry = logs.find((row) => row.kind === 'test' && row.prNumber === Number(item.pull.number))
+      if (entry && seq === selectionSeq) testSummary.value = entry.aiSummary ?? ''
+    } catch { }
+  }
   expandedFiles.value = {}
   expandedDirs.value = {}
   fullFileViews.value = {}
@@ -1272,6 +1287,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
                 <span v-else class="automation-note">未配置测试(部署页配置)</span>
                 <button class="automation-action" :disabled="runningTest || selectedEnded || selectedPull.pull.state === 'testing' || !testConfigOf(selectedPull.project.id)" @click="runSelectedTest">发起测试</button>
               </div>
+              <div v-if="testSummary" class="test-summary-card"><strong>AI 汇总</strong><p>{{ testSummary }}</p></div>
               <div v-if="testOutput" class="test-output-row"><pre ref="testOutputEl" class="automation-test-output">{{ testOutput }}</pre></div>
               <div class="automation-row">
                 <span class="automation-label">人工标记</span>
@@ -1346,7 +1362,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           </div>
           <div class="settings-section log-section">
             <div v-if="!requestLogRows.length && !loadingRequestLogs" class="settings-empty">暂无接口日志。</div>
-            <div v-for="row in requestLogRows" :key="row.id" :class="['log-row', { error: !row.ok }]">
+            <div v-for="row in requestLogRows" :key="row.id" :class="['log-row', { error: !row.ok }]" title="点击查看详情" @click="requestLogDetail = row">
               <span class="log-time">{{ row.createdAt }}</span>
               <span class="log-project">{{ row.projectName }}</span>
               <code class="log-endpoint">{{ row.method }} {{ row.endpoint }}</code>
@@ -1442,6 +1458,20 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
         <label>超时(秒)<input v-model="testForm.timeoutSec" type="number" min="30" step="30" /></label>
         <div class="modal-actions"><button type="button" @click="testModal = false">取消</button><button class="primary" type="submit" :disabled="savingTest">{{ savingTest ? '保存中…' : '保存' }}</button></div>
       </form>
+    </div>
+    <div v-if="requestLogDetail" class="modal-backdrop" @click.self="requestLogDetail = null">
+      <div class="modal log-detail-modal">
+        <h2>接口日志详情</h2>
+        <div class="log-detail-grid">
+          <span>时间</span><code>{{ requestLogDetail.createdAt }}</code>
+          <span>项目</span><code>{{ requestLogDetail.projectName }}</code>
+          <span>请求</span><code>{{ requestLogDetail.method }} {{ requestLogDetail.endpoint }}</code>
+          <span>状态</span><code :class="requestLogDetail.ok ? 'stat-added' : 'stat-removed'">{{ requestLogDetail.ok ? `成功 (${requestLogDetail.status})` : `失败 (${requestLogDetail.status || '网络错误'})` }}</code>
+          <span>耗时</span><code>{{ requestLogDetail.durationMs }}ms</code>
+        </div>
+        <div v-if="requestLogDetail.errorMessage" class="error-message log-detail-error">{{ requestLogDetail.errorMessage }}</div>
+        <div class="modal-actions"><button class="primary" @click="requestLogDetail = null">关闭</button></div>
+      </div>
     </div>
     <div v-if="oneClickRun" class="modal-backdrop">
       <div class="modal one-click-modal">

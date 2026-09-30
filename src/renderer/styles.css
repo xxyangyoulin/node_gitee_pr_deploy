@@ -309,3 +309,12 @@ button:disabled { cursor: not-allowed; }
 .ai-summary-card { margin-bottom: 12px; padding: 10px 14px; border: 1px solid #d4a72c; border-radius: 8px; background: #fff8c5; }
 .ai-summary-card strong { display: block; margin-bottom: 4px; font-size: 13px; color: #7d4e00; }
 .ai-summary-card p { margin: 0; font-size: 13px; line-height: 1.5; color: #1f2328; white-space: pre-wrap; }
+.test-summary-card { margin: 6px 14px; padding: 10px 14px; border: 1px solid #d4a72c; border-radius: 8px; background: #fff8c5; }
+.test-summary-card strong { display: block; margin-bottom: 4px; font-size: 13px; color: #7d4e00; }
+.test-summary-card p { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.log-row { cursor: pointer; }
+.log-detail-modal { width: 560px; }
+.log-detail-grid { display: grid; grid-template-columns: 64px 1fr; gap: 8px 14px; font-size: 13px; margin: 14px 0; }
+.log-detail-grid span { color: #57606a; }
+.log-detail-grid code { word-break: break-all; }
+.log-detail-error { max-height: 220px; overflow-y: auto; white-space: pre-wrap; }

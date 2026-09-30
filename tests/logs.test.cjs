@@ -47,6 +47,17 @@ function check(name, cond) {
   check('成功行含耗时', (await page.locator('.log-row').last().textContent()).includes('120ms'))
   await page.screenshot({ path: shot('logs.png') })
 
+  // 点击行查看详情弹窗
+  await page.locator('.log-row.error').click()
+  await page.waitForTimeout(200)
+  const detail = page.locator('.log-detail-modal')
+  check('点击日志行打开详情弹窗', await detail.isVisible())
+  check('详情含完整错误信息', (await detail.locator('.log-detail-error').textContent()).includes('Gitee 500: 服务器内部错误'))
+  check('详情含请求与耗时', (await detail.textContent()).includes('PUT pulls/7/merge') && (await detail.textContent()).includes('812ms'))
+  await detail.locator('button', { hasText: '关闭' }).click()
+  await page.waitForTimeout(100)
+  check('关闭弹窗', (await page.locator('.log-detail-modal').count()) === 0)
+
   // 项目筛选
   const filters = page.locator('.heading-actions .filter-select')
   await filters.first().locator('.dropdown-toggle').click()
