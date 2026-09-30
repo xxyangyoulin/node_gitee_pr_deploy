@@ -89,7 +89,7 @@ function buildScript(database: DatabaseSync, context: TestContext, config: TestC
   steps.push(
     `cd ${shellQuote(workdir)}`,
     'git fetch --all --prune',
-    'git clean -fd',
+    'git clean -fd -e .env -e .env.*',
     `git checkout -f ${shellQuote(context.pr.head_sha || 'HEAD')}`,
     command,
   )
