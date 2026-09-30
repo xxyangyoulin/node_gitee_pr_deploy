@@ -22,6 +22,7 @@ window.releaseConsole = {
   listDeploymentConfigs: () => request('/api/deployment/targets'),
   saveDeploymentTarget: (input) => request('/api/deployment/targets', { method: 'POST', body: JSON.stringify(input) }),
   deleteDeploymentTarget: (id) => request('/api/deployment/targets/delete', { method: 'POST', body: JSON.stringify({ id }) }),
+  reorderDeploymentTargets: (ids) => request('/api/deployment/targets/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
   listDeploymentServers: () => request('/api/deployment/servers'),
   runDeployment: async (targetId, onChunk) => {
     const response = await fetch('/api/deployment/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId }) })

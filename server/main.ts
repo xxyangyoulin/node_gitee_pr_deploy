@@ -94,6 +94,10 @@ async function api(request: import('node:http').IncomingMessage, response: impor
     return json(response, 200, { id: Number(result.lastInsertRowid), ...input, position: Number(position) })
   }
   if (path === '/api/deployment/targets/delete' && request.method === 'POST') { database.prepare('DELETE FROM deploy_targets WHERE id=?').run(input.id); return json(response, 200, {}) }
+  if (path === '/api/deployment/targets/reorder' && request.method === 'POST') {
+    for (const [index, id] of (input.ids as number[]).entries()) database.prepare('UPDATE deploy_targets SET position=? WHERE id=?').run(index, id)
+    return json(response, 200, {})
+  }
   if (path === '/api/deployment/logs' && request.method === 'GET') {
     const params = new URL(request.url || '', 'http://localhost').searchParams
     const projectId = Number(params.get('projectId')) || 0

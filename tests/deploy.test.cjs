@@ -13,7 +13,7 @@ const targets = [
   { id: 12, projectId: 1, projectName: 'proj-one', name: 'web-2', host: 'b.org', username: 'root', remotePath: '/srv/two', command: './ship.sh', position: 1 },
 ]
 const deployLogs = [{ id: 1, projectId: 1, projectName: 'proj-one', targetName: 'web-1', host: 'deploy@a.com', output: '历史输出', success: 1, createdAt: '2026-09-01 10:00:00' }]
-const saved = { targets: [], deletes: [], runs: [] }
+const saved = { targets: [], deletes: [], runs: [], reorders: [] }
 let failures = 0
 
 function check(name, cond) {
@@ -40,6 +40,13 @@ function check(name, cond) {
         targets.push({ id: 99, projectId: input.projectId, projectName: input.projectId === 1 ? 'proj-one' : 'proj-two', name: input.name, host: input.host, username: input.username, remotePath: input.remotePath, command: input.command, position: 0 })
       }
       return route.fulfill({ json: { ...input } })
+    }
+    if (url.pathname === '/api/deployment/targets/reorder' && req.method() === 'POST') {
+      saved.reorders.push(req.postDataJSON().ids)
+      const ids = req.postDataJSON().ids
+      targets.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id))
+      ids.forEach((id, index) => { const row = targets.find((item) => item.id === id); if (row) row.position = index })
+      return route.fulfill({ json: {} })
     }
     if (url.pathname === '/api/deployment/targets/delete' && req.method() === 'POST') {
       const input = req.postDataJSON()
@@ -90,6 +97,28 @@ function check(name, cond) {
   await page.waitForTimeout(300)
   check('保存请求写入项目 2', saved.targets.at(-1)?.projectId === 2 && saved.targets.at(-1)?.name === 'db-1')
   check('proj-two 分组出现新目标', (await page.locator('.deploy-group').last().locator('.deploy-target-row').count()) === 1)
+
+  // 目标排序:下移 web-1
+  check('初始顺序 web-1 在前', (await page.locator('.deploy-target-row').first().textContent()).includes('web-1'))
+  await page.locator('.deploy-target-row').first().locator('.move-btn[title=下移]').click()
+  await page.waitForTimeout(300)
+  check('下移请求交换顺序', JSON.stringify(saved.reorders.at(-1)) === JSON.stringify([12, 11]))
+  check('列表顺序更新 web-2 在前', (await page.locator('.deploy-target-row').first().textContent()).includes('web-2'))
+  check('首行下移可用且上移禁用', !(await page.locator('.deploy-target-row').first().locator('.move-btn[title=下移]').isDisabled()) && (await page.locator('.deploy-target-row').first().locator('.move-btn[title=上移]').isDisabled()))
+  await page.locator('.deploy-target-row').nth(1).locator('.move-btn[title=上移]').click()
+  await page.waitForTimeout(300)
+  check('上移恢复顺序', (await page.locator('.deploy-target-row').first().textContent()).includes('web-1'))
+
+  // 历史按项目筛选
+  await page.locator('.history-filter .dropdown-toggle').click()
+  await page.locator('.dropdown-menu button', { hasText: 'proj-one' }).click()
+  await page.waitForTimeout(200)
+  const visibleNames = await page.locator('.history-row .history-name').allTextContents()
+  check('筛选后仅显示该项目记录', visibleNames.length > 0 && visibleNames.every((name) => name === 'proj-one'))
+  await page.locator('.history-filter .dropdown-toggle').click()
+  await page.locator('.dropdown-menu button', { hasText: '全部项目' }).click()
+  await page.waitForTimeout(200)
+  check('恢复全部项目记录', (await page.locator('.history-row').count()) === (await page.locator('.history-row .history-name').allTextContents()).length)
 
   // 编辑目标 web-2
   await page.locator('.deploy-group').first().locator('.deploy-target-row', { hasText: 'web-2' }).locator('button', { hasText: '编辑' }).click()

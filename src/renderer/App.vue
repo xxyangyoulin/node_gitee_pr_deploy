@@ -45,9 +45,16 @@ const expandedFiles = ref<Record<string, boolean>>({})
 const loadingFiles = ref(false)
 const commits = ref<any[]>([])
 const sidebarTab = ref<'files' | 'commits'>('files')
-const filesTabHover = ref(false)
 const sqlFiles = computed(() => files.value.filter((file) => isSqlFile(file.filename)))
-const sqlPopVisible = computed(() => sqlFiles.value.length > 0 && (sidebarTab.value !== 'files' || filesTabHover.value))
+const sqlPopVisible = computed(() => sqlFiles.value.length > 0)
+const sqlPopStyle = ref<{ left: string; top: string }>({ left: '-999px', top: '-999px' })
+
+function updateSqlPopPosition() {
+  const tab = document.querySelector('.files-tab')
+  if (!tab) return
+  const rect = tab.getBoundingClientRect()
+  sqlPopStyle.value = { left: `${Math.max(8, rect.left - 4)}px`, top: `${rect.top - 10}px` }
+}
 
 function locateFirstSql() {
   sidebarTab.value = 'files'
@@ -146,6 +153,8 @@ const deploymentGroups = computed<DeployGroup[]>(() => projects.value.map((proje
   targets: deploymentRows.value.filter((row) => row.projectId === project.id).sort((a, b) => a.position - b.position || a.id - b.id),
 })))
 const deployHistory = ref<Array<{ id: number; projectId: number; projectName: string; targetName: string; host: string; output: string; success: number; createdAt: string }>>([])
+const historyFilter = ref<number | 'all'>('all')
+const filteredHistory = computed(() => historyFilter.value === 'all' ? deployHistory.value : deployHistory.value.filter((entry) => entry.projectId === historyFilter.value))
 const activeHistoryId = ref(0)
 const configModal = ref(false)
 const configForm = ref({ id: 0, projectId: 0, projectName: '', name: '', host: '', username: '', remotePath: '', command: '' })
@@ -511,6 +520,18 @@ async function saveTarget() {
     mergeMessage.value = '部署目标已保存'
     await loadDeploymentRows()
   } catch (error) { configFormError.value = error instanceof Error ? error.message : '保存配置失败' } finally { savingConfig.value = false }
+}
+
+async function moveTarget(row: DeploymentRow, direction: -1 | 1) {
+  const group = deploymentGroups.value.find((item) => item.project.id === row.projectId)
+  if (!group) return
+  const ids = group.targets.map((target) => target.id)
+  const index = ids.indexOf(row.id)
+  const swapWith = index + direction
+  if (index < 0 || swapWith < 0 || swapWith >= ids.length) return
+  ;[ids[index], ids[swapWith]] = [ids[swapWith], ids[index]]
+  await window.releaseConsole.reorderDeploymentTargets(ids)
+  await loadDeploymentRows()
 }
 
 function askDeleteTarget(row: DeploymentRow) {
@@ -963,6 +984,9 @@ watch(activePage, (page) => {
   if (page === 'pulls') loadPulls()
   if (page === 'deployments') loadDeploymentRows()
 })
+watch([sqlPopVisible, activePage, loadingFiles], () => nextTick(updateSqlPopPosition))
+window.addEventListener('resize', updateSqlPopPosition)
+onMounted(updateSqlPopPosition)
 
 watch([errorMessage, mergeMessage], ([error, success]) => {
   const message = success || error
@@ -1005,7 +1029,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             <div v-if="pullLoadErrors.length" class="load-warning">部分项目 PR 加载失败：{{ pullLoadErrors.join('；') }}</div>
             <div class="pr-workspace">
             <aside class="pr-list"><div v-if="!filteredPulls.length && !loadingPulls" class="list-empty">没有开放 PR</div><button v-for="item in filteredPulls" :key="`${item.project.id}-${item.pull.number}`" :class="['pr-item', { selected: isSelected(item) }]" @click="selectPull(item)"><span class="project-badge" :title="item.project.repository">{{ item.project.name }}</span><strong>#{{ item.pull.number }} {{ item.pull.title }}</strong><span>{{ authorOf(item.pull) }}</span><small class="pr-branches"><span class="branch-chip branch-head" :class="{ 'branch-main': isMainBranch(item.pull.head?.ref || item.pull.head?.label) }" :title="item.pull.head?.label || item.pull.head?.ref">{{ item.pull.head?.ref || item.pull.head?.label || '?' }}</span><span class="branch-arrow">→</span><span class="branch-chip branch-base" :class="{ 'branch-main': isMainBranch(item.pull.base?.ref || item.pull.base?.label) }" :title="item.pull.base?.label || item.pull.base?.ref">{{ item.pull.base?.ref || item.pull.base?.label || '?' }}</span></small><small class="pr-time">{{ formatTime(item.pull.created_at) }}</small></button></aside>
-            <section class="code-panel" :class="{ 'has-list': files.length > 0 && !loadingFiles }" :style="files.length > 0 && !loadingFiles ? { gridTemplateColumns: `${fileListWidth}px 5px minmax(0, 1fr)` } : undefined"><aside v-if="files.length > 0 && !loadingFiles" class="file-list"><div class="sidebar-tabs"><button :class="{ active: sidebarTab === 'files' }" class="files-tab" @mouseenter="filesTabHover = true" @mouseleave="filesTabHover = false" @click="sidebarTab = 'files'">文件<span v-if="sqlFiles.length" class="sql-dot"></span><span v-if="sqlPopVisible" class="sql-pop" title="点击定位第一个 SQL 文件" @click.stop="locateFirstSql()">有 SQL 变动：{{ sqlFiles.map((file) => file.filename.split('/').pop()).join('、') }}</span></button><button :class="{ active: sidebarTab === 'commits' }" @click="sidebarTab = 'commits'">提交记录</button></div><div class="file-list-scroll"><template v-if="sidebarTab === 'files'"><button v-for="row in fileTreeRows" :key="row.type + ':' + row.key" :class="['file-item', { dir: row.type === 'dir', active: row.type === 'file' && row.index === activeFileIndex, sql: row.type === 'file' && isSqlFile(row.key) }]" :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }" :title="row.key" @click="row.type === 'dir' ? toggleDir(row.key) : jumpToFile(row.index)"><span v-if="row.type === 'dir'" class="file-toggle">{{ isDirExpanded(row.key) || fileQuery.trim() ? '▾' : '▸' }}</span><span class="file-name">{{ row.name }}</span><span v-if="row.type === 'file' && isSqlFile(row.key)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ row.added }}</span><span class="stat-removed">-{{ row.removed }}</span></span></button></template><template v-else><button v-for="commit in commits" :key="commit.sha" :class="['commit-item', { active: viewingCommit?.sha === commit.sha }]" :title="firstLine(commit.commit?.message)" @click="selectCommit(commit)"><span class="commit-message">{{ firstLine(commit.commit?.message) }}</span><span class="commit-meta"><span>{{ commit.commit?.author?.name || '未知提交人' }}</span><span class="commit-sha" title="点击复制 SHA" @click.stop="copyCommitSha(commit)">{{ shortSha(commit.sha) }}</span><span class="history-time">{{ formatTime(commit.commit?.author?.date) }}</span></span></button><div v-if="!commits.length" class="settings-empty">暂无提交记录</div></template></div></aside><div v-if="files.length > 0 && !loadingFiles" class="resize-handle" @mousedown="startResize"></div><div class="files-main"><div v-if="loadingFiles" class="empty-state loading-state"><LoadingAnim /><p>加载文件中…</p></div><div v-else-if="commitLoading" class="empty-state loading-state"><LoadingAnim /><p>加载提交内容…</p></div><div v-else-if="!selectedPull" class="empty-state">选择一个 PR 查看变更与操作</div><div v-else-if="!files.length" class="empty-state">该 PR 没有可展示的文件</div><template v-else><div class="files-toolbar"><span v-if="viewingCommit" class="commit-viewing">正在查看提交 <span class="commit-sha">{{ shortSha(viewingCommit.sha) }}</span> · {{ files.length }} 个文件<button type="button" class="commit-back" @click="exitCommitView">← 返回 PR 文件</button></span><span v-else>{{ fileQuery.trim() ? `${matchedCount}/${files.length} 个文件` : `${files.length} 个文件` }}</span><span class="toolbar-stats"><span class="stat-added">+{{ totalStats.added }}</span><span class="stat-removed">-{{ totalStats.removed }}</span></span><span class="toolbar-spacer"></span><input v-model="fileQuery" class="file-search" placeholder="搜索文件名" /><button @click="setAllFilesExpanded(true)">全部展开</button><button @click="setAllFilesExpanded(false)">全部收起</button></div><div ref="filesScrollEl" class="files-scroll" @scroll="onFilesScroll"><div v-for="(file, index) in files" :id="`pr-file-card-${index}`" :key="file.filename" v-show="fileMatches(file.filename)" :data-index="index" class="file-card"><button class="file-card-header" :class="{ 'sql-card': isSqlFile(file.filename) }" @click="toggleFile(file.filename)"><span class="file-toggle">{{ isFileExpanded(file.filename) ? '▾' : '▸' }}</span><span class="file-name" :title="file.filename">{{ file.filename }}</span><span v-if="isSqlFile(file.filename)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ fileStats[index]?.added ?? 0 }}</span><span class="stat-removed">-{{ fileStats[index]?.removed ?? 0 }}</span></span><span class="copy-btn" title="复制 diff" @click.stop="copyPatch(file)">复制</span><span class="copy-btn full-toggle" :class="{ active: isFullFileView(file.filename) }" title="查看完整文件 / 切回 diff" @click.stop="toggleFullFile(file)">{{ isFullFileView(file.filename) ? '返回 diff' : '完整文件' }}</span></button><pre v-if="isFileExpanded(file.filename) && isFullFileView(file.filename)" class="code-view file-diff full-file">{{ fullFileLoading[file.filename] ? '加载中…' : fullFileContents[file.filename] || '无法加载文件内容' }}</pre><pre v-else-if="isFileExpanded(file.filename)" class="code-view file-diff"><code><span v-for="(line, lineIndex) in fileDiffs[index]" :key="lineIndex" :class="['code-line', `line-${line.kind}`]"><span class="line-prefix">{{ line.prefix }}</span><span v-html="line.html"></span></span></code></pre></div></div></template></div></section>
+            <section class="code-panel" :class="{ 'has-list': files.length > 0 && !loadingFiles }" :style="files.length > 0 && !loadingFiles ? { gridTemplateColumns: `${fileListWidth}px 5px minmax(0, 1fr)` } : undefined"><aside v-if="files.length > 0 && !loadingFiles" class="file-list"><div class="sidebar-tabs"><button :class="{ active: sidebarTab === 'files' }" class="files-tab" @click="sidebarTab = 'files'">文件<span v-if="sqlFiles.length" class="sql-dot"></span></button><button :class="{ active: sidebarTab === 'commits' }" @click="sidebarTab = 'commits'">提交记录</button></div><div class="file-list-scroll"><template v-if="sidebarTab === 'files'"><button v-for="row in fileTreeRows" :key="row.type + ':' + row.key" :class="['file-item', { dir: row.type === 'dir', active: row.type === 'file' && row.index === activeFileIndex, sql: row.type === 'file' && isSqlFile(row.key) }]" :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }" :title="row.key" @click="row.type === 'dir' ? toggleDir(row.key) : jumpToFile(row.index)"><span v-if="row.type === 'dir'" class="file-toggle">{{ isDirExpanded(row.key) || fileQuery.trim() ? '▾' : '▸' }}</span><span class="file-name">{{ row.name }}</span><span v-if="row.type === 'file' && isSqlFile(row.key)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ row.added }}</span><span class="stat-removed">-{{ row.removed }}</span></span></button></template><template v-else><button v-for="commit in commits" :key="commit.sha" :class="['commit-item', { active: viewingCommit?.sha === commit.sha }]" :title="firstLine(commit.commit?.message)" @click="selectCommit(commit)"><span class="commit-message">{{ firstLine(commit.commit?.message) }}</span><span class="commit-meta"><span>{{ commit.commit?.author?.name || '未知提交人' }}</span><span class="commit-sha" title="点击复制 SHA" @click.stop="copyCommitSha(commit)">{{ shortSha(commit.sha) }}</span><span class="history-time">{{ formatTime(commit.commit?.author?.date) }}</span></span></button><div v-if="!commits.length" class="settings-empty">暂无提交记录</div></template></div></aside><div v-if="files.length > 0 && !loadingFiles" class="resize-handle" @mousedown="startResize"></div><div class="files-main"><div v-if="loadingFiles" class="empty-state loading-state"><LoadingAnim /><p>加载文件中…</p></div><div v-else-if="commitLoading" class="empty-state loading-state"><LoadingAnim /><p>加载提交内容…</p></div><div v-else-if="!selectedPull" class="empty-state">选择一个 PR 查看变更与操作</div><div v-else-if="!files.length" class="empty-state">该 PR 没有可展示的文件</div><template v-else><div class="files-toolbar"><span v-if="viewingCommit" class="commit-viewing">正在查看提交 <span class="commit-sha">{{ shortSha(viewingCommit.sha) }}</span> · {{ files.length }} 个文件<button type="button" class="commit-back" @click="exitCommitView">← 返回 PR 文件</button></span><span v-else>{{ fileQuery.trim() ? `${matchedCount}/${files.length} 个文件` : `${files.length} 个文件` }}</span><span class="toolbar-stats"><span class="stat-added">+{{ totalStats.added }}</span><span class="stat-removed">-{{ totalStats.removed }}</span></span><span class="toolbar-spacer"></span><input v-model="fileQuery" class="file-search" placeholder="搜索文件名" /><button @click="setAllFilesExpanded(true)">全部展开</button><button @click="setAllFilesExpanded(false)">全部收起</button></div><div ref="filesScrollEl" class="files-scroll" @scroll="onFilesScroll"><div v-for="(file, index) in files" :id="`pr-file-card-${index}`" :key="file.filename" v-show="fileMatches(file.filename)" :data-index="index" class="file-card"><button class="file-card-header" :class="{ 'sql-card': isSqlFile(file.filename) }" @click="toggleFile(file.filename)"><span class="file-toggle">{{ isFileExpanded(file.filename) ? '▾' : '▸' }}</span><span class="file-name" :title="file.filename">{{ file.filename }}</span><span v-if="isSqlFile(file.filename)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ fileStats[index]?.added ?? 0 }}</span><span class="stat-removed">-{{ fileStats[index]?.removed ?? 0 }}</span></span><span class="copy-btn" title="复制 diff" @click.stop="copyPatch(file)">复制</span><span class="copy-btn full-toggle" :class="{ active: isFullFileView(file.filename) }" title="查看完整文件 / 切回 diff" @click.stop="toggleFullFile(file)">{{ isFullFileView(file.filename) ? '返回 diff' : '完整文件' }}</span></button><pre v-if="isFileExpanded(file.filename) && isFullFileView(file.filename)" class="code-view file-diff full-file">{{ fullFileLoading[file.filename] ? '加载中…' : fullFileContents[file.filename] || '无法加载文件内容' }}</pre><pre v-else-if="isFileExpanded(file.filename)" class="code-view file-diff"><code><span v-for="(line, lineIndex) in fileDiffs[index]" :key="lineIndex" :class="['code-line', `line-${line.kind}`]"><span class="line-prefix">{{ line.prefix }}</span><span v-html="line.html"></span></span></code></pre></div></div></template></div></section>
           </div>
           </template>
         </section>
@@ -1030,6 +1054,8 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
                   <span class="target-path">{{ target.remotePath || '—' }}</span>
                   <code class="target-cmd">{{ target.command || '—' }}</code>
                   <div class="row-actions">
+                    <button class="move-btn" :disabled="deployLog.running || group.targets.indexOf(target) === 0" title="上移" @click="moveTarget(target, -1)">↑</button>
+                    <button class="move-btn" :disabled="deployLog.running || group.targets.indexOf(target) === group.targets.length - 1" title="下移" @click="moveTarget(target, 1)">↓</button>
                     <button class="primary" :disabled="!configComplete(target) || deployLog.running" @click="runTargetDeployment(target)">执行</button>
                     <button @click="openEditTarget(target)">编辑</button>
                     <button class="danger" @click="askDeleteTarget(target)">删除</button>
@@ -1045,8 +1071,9 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           </div>
           <div class="settings-section">
             <h2>部署历史</h2>
-            <div v-if="!deployHistory.length" class="settings-empty">暂无部署记录。</div>
-            <div v-for="entry in deployHistory" :key="entry.id" :class="['history-row', { active: activeHistoryId === entry.id }]" @click="showHistory(entry)">
+            <div class="history-toolbar"><DropdownSelect v-model="historyFilter" class="history-filter" :options="[{ value: 'all', label: '全部项目' }, ...projects.map((project) => ({ value: project.id, label: project.name }))]" /></div>
+            <div v-if="!filteredHistory.length" class="settings-empty">暂无部署记录。</div>
+            <div v-for="entry in filteredHistory" :key="entry.id" :class="['history-row', { active: activeHistoryId === entry.id }]" @click="showHistory(entry)">
               <span :class="entry.success ? 'stat-added' : 'stat-removed'">{{ entry.success ? '✓' : '✗' }}</span>
               <span class="history-name">{{ entry.projectName }}</span>
               <span class="history-host">{{ entry.host }}</span>
@@ -1088,6 +1115,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
     <div v-if="configModal" class="modal-backdrop" @click.self="configModal = false">
       <form class="modal" @submit.prevent="saveTarget"><h2>{{ configForm.id ? '编辑部署目标' : '添加部署目标' }}</h2><div v-if="configFormError" class="error-message">{{ configFormError }}</div><label>项目<input :value="configForm.projectName" disabled /></label><label>目标别名<input v-model="configForm.name" placeholder="如 web-1 / staging" /></label><label>服务器地址<span class="combo"><input v-model="configForm.host" placeholder="example.com" @focus="showHostSuggestions = true" @blur="showHostSuggestions = false" /><span v-if="showHostSuggestions && hostSuggestions.length" class="combo-menu"><button type="button" v-for="host in hostSuggestions" :key="host" @mousedown.prevent="pickHost(host)">{{ host }}</button></span></span></label><label>SSH 用户<span class="combo"><input v-model="configForm.username" placeholder="deploy" @focus="showUserSuggestions = true" @blur="showUserSuggestions = false" /><span v-if="showUserSuggestions && userSuggestions.length" class="combo-menu"><button type="button" v-for="username in userSuggestions" :key="username" @mousedown.prevent="pickUser(username)">{{ username }}</button></span></span></label><label>远程目录<input v-model="configForm.remotePath" placeholder="/srv/app" /></label><label>部署命令<input v-model="configForm.command" placeholder="git pull && ./deploy.sh" /></label><div class="modal-actions"><button type="button" @click="configModal = false">取消</button><button class="primary" type="submit" :disabled="savingConfig">{{ savingConfig ? '保存中…' : '保存' }}</button></div></form>
     </div>
+    <div v-if="sqlPopVisible && activePage === 'pulls'" class="sql-pop" title="点击定位第一个 SQL 文件" :style="sqlPopStyle" @click="locateFirstSql()"><span class="sql-pop-text">有 SQL 变动：{{ sqlFiles.map((file) => file.filename.split('/').pop()).join('、') }}</span></div>
     <div v-if="toastMessage" class="toast">{{ toastMessage }}</div>
     <div v-if="oneClickRun" class="modal-backdrop">
       <div class="modal one-click-modal">

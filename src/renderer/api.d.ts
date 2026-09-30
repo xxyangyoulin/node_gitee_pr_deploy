@@ -10,6 +10,7 @@ interface Window {
     listDeploymentConfigs(): Promise<Array<{ id: number; projectId: number; projectName: string; name: string; host: string; username: string; remotePath: string; command: string; position: number }>>
     saveDeploymentTarget(input: { id?: number; projectId: number; name: string; host: string; username: string; remotePath: string; command: string }): Promise<unknown>
     deleteDeploymentTarget(id: number): Promise<unknown>
+    reorderDeploymentTargets(ids: number[]): Promise<unknown>
     runDeployment(targetId: number, onChunk?: (text: string) => void): Promise<string>
     listDeploymentServers(): Promise<Array<{ host: string; username: string }>>
     listDeploymentLogs(query?: { projectId?: number; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; targetName: string; host: string; output: string; success: number; createdAt: string }>>
