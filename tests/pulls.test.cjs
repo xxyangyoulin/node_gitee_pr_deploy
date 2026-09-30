@@ -53,8 +53,10 @@ function check(name, cond) {
           headRef: pull.head?.ref || '',
           baseRef: pull.base?.ref || '',
           headSha: pull.head?.sha || '',
-          state: pull.state === 'open' ? 'new' : (pull.state || 'new'),
-          statusNote: '',
+          state: (pull.state ?? 'open') === 'open' ? (pull.number === 13 ? 'needs_test' : 'new') : (pull.state || 'new'),
+          statusNote: pull.number === 13 ? '包含 SQL 变更' : '',
+          aiResult: pull.number === 13 ? JSON.stringify({ needs_test: true, reason: '包含 SQL 变更', risk_level: 'high' }) : '',
+          aiEvaluatedAt: '',
           createdAt: pull.created_at,
           updatedAt: pull.created_at,
         }]
@@ -146,6 +148,11 @@ function check(name, cond) {
   check('选中行高亮', (await page.locator('.pr-item.selected').count()) === 1)
   check('标题栏显示已选 PR', (await page.locator('.page-heading .selected-project-badge').textContent()) === 'proj-two' && (await page.locator('.page-heading .selected-pr-ref').textContent()).includes('#13'))
   check('标题栏项目徽章为紫色高亮', (await page.locator('.page-heading .selected-project-badge').evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(251, 239, 255)')
+  const verdict = page.locator('.ai-verdict')
+  check('AI 结论条展示', (await verdict.count()) === 1 && (await verdict.textContent()).includes('需要测试') && (await verdict.textContent()).includes('包含 SQL 变更'))
+  check('高风险结论条红色', (await verdict.evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(255, 235, 233)')
+  check('待测试徽章显示', (await page.locator('.pr-item.selected .state-badge').textContent()) === '待测试')
+
   const oneClickBtn = page.locator('.heading-actions button', { hasText: '一键 master' })
   check('非 dock→dock 显示一键 master', (await oneClickBtn.count()) === 1)
 

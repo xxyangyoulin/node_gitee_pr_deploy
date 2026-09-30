@@ -62,6 +62,24 @@ const stateBadgeMap: Record<string, { label: string; cls: string }> = {
 function stateBadge(state: string) {
   return stateBadgeMap[state] ?? { label: state, cls: 'st-new' }
 }
+
+const selectedAiVerdict = computed<{ needs_test: boolean; reason: string; risk_level: string } | null>(() => {
+  const raw = selectedPull.value?.pull?.ai_result
+  if (!raw) return null
+  try { return JSON.parse(raw) } catch { return null }
+})
+
+const aiTesting = ref(false)
+const aiTestMessage = ref('')
+
+async function testAi() {
+  aiTesting.value = true
+  aiTestMessage.value = ''
+  try {
+    const { message } = await window.releaseConsole.testAiConnection({ aiBaseUrl: settings.value.aiBaseUrl, aiApiKey: settings.value.aiApiKey, aiModel: settings.value.aiModel, aiPrompt: settings.value.aiPrompt })
+    aiTestMessage.value = message
+  } catch (error) { aiTestMessage.value = error instanceof Error ? error.message : '连接失败' } finally { aiTesting.value = false }
+}
 const pullFilter = ref<number | 'all'>('all')
 const pullListTab = ref<'open' | 'ended'>('open')
 const isEndedPull = (item: PullItem) => item.pull.state === 'merged' || item.pull.state === 'closed'
@@ -168,7 +186,7 @@ const isDockToMaster = computed(() => {
 const showOneClickDeploy = computed(() => !!oneClickTarget.value || isDockToMaster.value)
 const selectedEnded = computed(() => !!selectedPull.value && isEndedPull(selectedPull.value))
 
-const settings = ref({ prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0' })
+const settings = ref({ prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0', aiBaseUrl: '', aiApiKey: '', aiModel: '', aiPrompt: '' })
 const meta = ref({ version: '', dataPath: '' })
 
 const showCreatePr = ref(false)
@@ -665,6 +683,8 @@ async function loadPulls() {
           updated_at: row.updatedAt,
           state: row.state,
           status_note: row.statusNote,
+          ai_result: row.aiResult,
+          ai_evaluated_at: row.aiEvaluatedAt,
         },
       }))
       .sort((a, b) => (Date.parse(String(b.pull.updated_at ?? b.pull.created_at ?? '')) || 0) - (Date.parse(String(a.pull.updated_at ?? a.pull.created_at ?? '')) || 0))
@@ -1098,7 +1118,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
         </section>
         <section v-else-if="activePage === 'pulls'" class="page pulls-page">
           <div class="page-heading">
-            <div><h1>PR</h1><p v-if="selectedPull" class="selected-pr-line">已选<span class="project-badge selected-project-badge" :title="selectedPull.project.repository">{{ selectedPull.project.name }}</span><strong class="selected-pr-ref">#{{ selectedPull.pull.number }} · {{ selectedPull.pull.title }}</strong></p><p v-else>汇总所有项目的开放 PR，点击左侧 PR 查看变更与操作。</p></div>
+            <div><h1>PR</h1><p v-if="selectedPull" class="selected-pr-line">已选<span class="project-badge selected-project-badge" :title="selectedPull.project.repository">{{ selectedPull.project.name }}</span><strong class="selected-pr-ref">#{{ selectedPull.pull.number }} · {{ selectedPull.pull.title }}</strong></p><p v-else>汇总所有项目的开放 PR，点击左侧 PR 查看变更与操作。</p><div v-if="selectedAiVerdict" :class="['ai-verdict', `risk-${selectedAiVerdict.risk_level}`]"><strong>AI 评估:{{ selectedAiVerdict.needs_test ? '需要测试' : '无需测试' }}</strong><span class="risk-chip">{{ selectedAiVerdict.risk_level }}</span><span>{{ selectedAiVerdict.reason }}</span></div></div>
             <div class="heading-actions">
               <DropdownSelect v-model="pullFilter" class="filter-select" :options="[{ value: 'all', label: '全部项目' }, ...projects.map((project) => ({ value: project.id, label: project.name }))]" />
               <button :class="{ passed: reviewPassed }" :disabled="!selectedPull || selectedEnded || reviewPassed" @click="approveSelectedPull">{{ reviewPassed ? '审查已通过' : '审查通过' }}</button><button :class="{ passed: testPassed }" :disabled="!selectedPull || selectedEnded || testPassed" @click="requestTestPassed">{{ testPassed ? '测试已通过' : '测试通过' }}</button><button class="merge-action" :class="{ ready: reviewPassed && testPassed, confirming: mergeConfirming }" :disabled="!selectedPull || selectedEnded" @click="requestMerge">{{ mergeConfirming ? '再次点击确认合并' : reviewPassed && testPassed ? '合并 PR' : '一键合并' }}</button><button v-if="oneClickTarget" class="one-click primary" :class="{ confirming: oneClickAction === 'master' }" :disabled="!!oneClickRun?.running || selectedEnded" @click="requestOneClick('master')">{{ oneClickAction === 'master' ? '再次点击确认' : `一键 ${settings.prBase}` }}</button><button v-if="showOneClickDeploy" class="one-click" :class="{ confirming: oneClickAction === 'deploy' }" :disabled="!!oneClickRun?.running || selectedEnded" @click="requestOneClick('deploy')">{{ oneClickAction === 'deploy' ? '再次点击确认' : '一键部署' }}</button><button :disabled="!projects.length" @click="openCreatePr">创建 PR</button><button :disabled="loadingPulls" @click="refreshPulls">{{ loadingPulls ? '刷新中…' : '刷新' }}</button>
@@ -1190,7 +1210,12 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             <label>PR 目标分支(base)<input v-model="settings.prBase" placeholder="master" /></label>
             <label>合并方式<DropdownSelect v-model="settings.mergeMethod" :options="[{ value: 'merge', label: 'merge · 保留完整历史' }, { value: 'rebase', label: 'rebase · 变基合并' }, { value: 'squash', label: 'squash · 压缩为单个提交' }]" /></label>
             <label>轮询间隔(秒,最小 60)<input v-model="settings.pollIntervalSec" type="number" min="60" step="10" /></label>
-            <label>全局自动化(阶段 2 生效)<DropdownSelect v-model="settings.automationEnabled" :options="[{ value: '0', label: '关闭' }, { value: '1', label: '开启' }]" /></label>
+            <label>全局自动化<DropdownSelect v-model="settings.automationEnabled" :options="[{ value: '0', label: '关闭' }, { value: '1', label: '开启' }]" /></label>
+            <label>模型 Base URL<input v-model="settings.aiBaseUrl" placeholder="https://api.deepseek.com/v1" /></label>
+            <label>API Key<input v-model="settings.aiApiKey" type="password" autocomplete="off" placeholder="sk-..." /></label>
+            <label>模型名<input v-model="settings.aiModel" placeholder="deepseek-chat" /></label>
+            <label>评估提示词(留空用默认,支持 <code v-pre>{{title}}</code>/<code v-pre>{{body}}</code>/<code v-pre>{{files}}</code>/<code v-pre>{{diff}}</code> 变量)<textarea v-model="settings.aiPrompt" rows="5" class="ai-prompt"></textarea></label>
+            <div class="ai-test-row"><button type="button" :disabled="aiTesting" @click="testAi">{{ aiTesting ? '测试中…' : '测试连接' }}</button><span v-if="aiTestMessage" :class="aiTestMessage.startsWith('连接成功') ? 'stat-added' : 'stat-removed'">{{ aiTestMessage }}</span></div>
             <div class="sync-project-list">
               <div v-for="row in syncStatusRows" :key="row.projectId" class="project-row">
                 <div class="project-row-info"><strong>{{ row.name }}</strong><span>{{ row.lastSyncAt ? `上次同步 ${row.lastSyncAt}` : '未同步' }}<template v-if="row.lastError"> · <em class="sync-error">{{ row.lastError }}</em></template></span></div>

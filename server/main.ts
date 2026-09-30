@@ -19,6 +19,8 @@ try { database.exec('ALTER TABLE deployment_logs ADD COLUMN target_name TEXT NOT
 database.exec('CREATE TABLE IF NOT EXISTS deploy_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, name TEXT NOT NULL DEFAULT "", host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", remote_path TEXT NOT NULL DEFAULT "", command TEXT NOT NULL DEFAULT "", position INTEGER NOT NULL DEFAULT 0)')
 database.exec('CREATE TABLE IF NOT EXISTS pr_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL DEFAULT "", body TEXT NOT NULL DEFAULT "", author TEXT NOT NULL DEFAULT "", head_ref TEXT NOT NULL DEFAULT "", base_ref TEXT NOT NULL DEFAULT "", head_sha TEXT NOT NULL DEFAULT "", state TEXT NOT NULL DEFAULT "new", status_note TEXT NOT NULL DEFAULT "", raw TEXT NOT NULL DEFAULT "", gitee_created_at TEXT NOT NULL DEFAULT "", gitee_updated_at TEXT NOT NULL DEFAULT "", first_seen_at TEXT NOT NULL DEFAULT "", last_seen_at TEXT NOT NULL DEFAULT "", synced_at TEXT NOT NULL DEFAULT "", UNIQUE(project_id, number))')
 database.exec('CREATE TABLE IF NOT EXISTS sync_state (project_id INTEGER PRIMARY KEY, last_sync_at TEXT NOT NULL DEFAULT "", last_error TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1)')
+try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_result TEXT NOT NULL DEFAULT ""') } catch { }
+try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_evaluated_at TEXT NOT NULL DEFAULT ""') } catch { }
 database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL DEFAULT 0, project_name TEXT NOT NULL DEFAULT "", endpoint TEXT NOT NULL DEFAULT "", method TEXT NOT NULL DEFAULT "GET", ok INTEGER NOT NULL DEFAULT 1, status INTEGER NOT NULL DEFAULT 0, error_message TEXT NOT NULL DEFAULT "", duration_ms INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
 {
   const targetCount = (database.prepare('SELECT COUNT(*) AS c FROM deploy_targets').get() as any).c
@@ -35,6 +37,7 @@ database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY A
 }
 
 import { setGiteeLogger } from './gitee.js'
+import { testModelConnection } from './ai.js'
 {
   let logCounter = 0
   setGiteeLogger((entry) => {
@@ -49,7 +52,7 @@ import { setGiteeLogger } from './gitee.js'
   })
 }
 
-const defaultSettings: Record<string, string> = { prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0' }
+const defaultSettings: Record<string, string> = { prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0', aiBaseUrl: '', aiApiKey: '', aiModel: '', aiPrompt: '' }
 
 function readSettings() {
   const rows = database.prepare('SELECT key,value FROM settings').all() as Array<{ key: string; value: string }>
@@ -133,6 +136,8 @@ async function api(request: import('node:http').IncomingMessage, response: impor
       headSha: row.head_sha,
       state: row.state,
       statusNote: row.status_note,
+      aiResult: row.ai_result,
+      aiEvaluatedAt: row.ai_evaluated_at,
       createdAt: row.gitee_created_at,
       updatedAt: row.gitee_updated_at,
     })))
@@ -144,6 +149,14 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   if (path === '/api/sync/status' && request.method === 'GET') {
     const rows = database.prepare('SELECT s.project_id AS projectId, p.name, s.last_sync_at AS lastSyncAt, s.last_error AS lastError, s.enabled FROM sync_state s JOIN projects p ON p.id=s.project_id ORDER BY s.project_id DESC').all()
     return json(response, 200, rows)
+  }
+  if (path === '/api/ai/test' && request.method === 'POST') {
+    const aiSettings = { aiBaseUrl: String(input.aiBaseUrl ?? ''), aiApiKey: String(input.aiApiKey ?? ''), aiModel: String(input.aiModel ?? ''), aiPrompt: String(input.aiPrompt ?? '') }
+    if (!aiSettings.aiBaseUrl || !aiSettings.aiApiKey || !aiSettings.aiModel) return json(response, 400, { message: '请先完整配置模型' })
+    try {
+      const reply = await testModelConnection(aiSettings)
+      return json(response, 200, { message: `连接成功:${reply}` })
+    } catch (error) { return json(response, 500, { message: error instanceof Error ? error.message : '连接失败' }) }
   }
   if (path === '/api/request-logs' && request.method === 'GET') {
     const params = new URL(request.url || '', 'http://localhost').searchParams

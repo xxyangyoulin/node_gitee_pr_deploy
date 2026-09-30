@@ -22,7 +22,8 @@ function check(name, cond) {
     const req = route.request()
     const path = new URL(req.url()).pathname
     if (path === '/api/projects') return route.fulfill({ json: PROJECTS })
-    if (path === '/api/settings' && req.method() === 'GET') return route.fulfill({ json: SETTINGS })
+    if (path === '/api/settings' && req.method() === 'GET') return route.fulfill({ json: { ...SETTINGS, aiBaseUrl: 'https://ai.example/v1', aiApiKey: '', aiModel: '', aiPrompt: '' } })
+    if (path === '/api/ai/test' && req.method() === 'POST') { const input = req.postDataJSON(); if (!input.aiApiKey) return route.fulfill({ status: 400, json: { message: '请先完整配置模型' } }); return route.fulfill({ json: { message: '连接成功:ok' } }) }
     if (path === '/api/settings' && req.method() === 'POST') { saved.settings.push(req.postDataJSON()); return route.fulfill({ json: req.postDataJSON() }) }
     if (path === '/api/projects/update') { const input = req.postDataJSON(); saved.updates.push(input); return route.fulfill({ json: { id: input.id, name: input.name, repository: input.repository, token: input.token || 'kept', openPrs: 0 } }) }
     if (path === '/api/meta') return route.fulfill({ json: { version: '9.9.9', dataPath: '/tmp/fake/release-console.sqlite' } })
@@ -63,6 +64,16 @@ function check(name, cond) {
   await page.locator('.settings-section button[type=submit]').click()
   await page.waitForTimeout(200)
   check('保存请求携带 squash', saved.settings.at(-1)?.mergeMethod === 'squash')
+  // AI 模型配置与测试连接
+  check('AI 配置预填 base url', (await page.locator('.settings-section input[placeholder="https://api.deepseek.com/v1"]').inputValue()) === 'https://ai.example/v1')
+  await page.locator('.ai-test-row button', { hasText: '测试连接' }).click()
+  await page.waitForTimeout(200)
+  check('未填 key 时测试连接报错', (await page.locator('.ai-test-row span').textContent()).includes('请先完整配置模型'))
+  await page.locator('.settings-section input[placeholder="sk-..."]').fill('sk-abc')
+  await page.locator('.ai-test-row button', { hasText: '测试连接' }).click()
+  await page.waitForTimeout(200)
+  check('配置完整时测试连接成功', (await page.locator('.ai-test-row span').textContent()).includes('连接成功'))
+
 
   // 创建 PR 弹窗:项目下拉 + 设置预填分支
   await page.locator('.nav-item', { hasText: /^PR$/ }).click()

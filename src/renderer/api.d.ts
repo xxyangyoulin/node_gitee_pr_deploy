@@ -4,8 +4,8 @@ interface Window {
     addProject(input: { name: string; repository: string; token: string }): Promise<{ id: number; name: string; repository: string; token: string; openPrs: number }>
     deleteProject(id: number): Promise<unknown>
     updateProject(input: { id: number; name: string; repository: string; token: string }): Promise<{ id: number; name: string; repository: string; token: string; openPrs: number }>
-    getSettings(): Promise<{ prHead: string; prBase: string; mergeMethod: string; pollIntervalSec: string; automationEnabled: string }>
-    saveSettings(input: { prHead: string; prBase: string; mergeMethod: string; pollIntervalSec?: string; automationEnabled?: string }): Promise<{ prHead: string; prBase: string; mergeMethod: string; pollIntervalSec: string; automationEnabled: string }>
+    getSettings(): Promise<{ prHead: string; prBase: string; mergeMethod: string; pollIntervalSec: string; automationEnabled: string; aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string }>
+    saveSettings(input: { prHead: string; prBase: string; mergeMethod: string; pollIntervalSec?: string; automationEnabled?: string; aiBaseUrl?: string; aiApiKey?: string; aiModel?: string; aiPrompt?: string }): Promise<{ prHead: string; prBase: string; mergeMethod: string; pollIntervalSec: string; automationEnabled: string; aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string }>
     getMeta(): Promise<{ version: string; dataPath: string }>
     listDeploymentConfigs(): Promise<Array<{ id: number; projectId: number; projectName: string; name: string; host: string; username: string; remotePath: string; command: string; position: number }>>
     saveDeploymentTarget(input: { id?: number; projectId: number; name: string; host: string; username: string; remotePath: string; command: string }): Promise<unknown>
@@ -15,9 +15,10 @@ interface Window {
     listDeploymentServers(): Promise<Array<{ host: string; username: string }>>
     listDeploymentLogs(query?: { projectId?: number; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; targetName: string; host: string; output: string; success: number; createdAt: string }>>
     listPullRequests(input: { repository: string; token: string }): Promise<any[]>
-    cachedPulls(query?: { projectId?: number }): Promise<Array<{ projectId: number; projectName: string; repository: string; token: string; number: number; title: string; body: string; author: string; headRef: string; baseRef: string; headSha: string; state: string; statusNote: string; createdAt: string; updatedAt: string }>>
+    cachedPulls(query?: { projectId?: number }): Promise<Array<{ projectId: number; projectName: string; repository: string; token: string; number: number; title: string; body: string; author: string; headRef: string; baseRef: string; headSha: string; state: string; statusNote: string; aiResult: string; aiEvaluatedAt: string; createdAt: string; updatedAt: string }>>
     refreshPulls(projectId?: number): Promise<{ results: Array<{ projectId: number; name: string; error: string }> }>
     syncStatus(): Promise<Array<{ projectId: number; name: string; lastSyncAt: string; lastError: string; enabled: number }>>
+    testAiConnection(input: { aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string }): Promise<{ message: string }>
     requestLogs(query?: { projectId?: number; status?: string; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; endpoint: string; method: string; ok: number; status: number; errorMessage: string; durationMs: number; createdAt: string }>>
     toggleSync(projectId: number, enabled: boolean): Promise<unknown>
     pullRequestDetail(input: { repository: string; token: string; number: number }): Promise<any>

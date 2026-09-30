@@ -59,6 +59,7 @@ window.releaseConsole = {
   },
   refreshPulls: (projectId?: number) => request('/api/pulls/refresh', { method: 'POST', body: JSON.stringify({ projectId }) }),
   syncStatus: () => request('/api/sync/status'),
+  testAiConnection: (input) => request('/api/ai/test', { method: 'POST', body: JSON.stringify(input) }),
   requestLogs: (query: { projectId?: number; status?: string; limit?: number } = {}) => {
     const params = new URLSearchParams()
     if (query.projectId) params.set('projectId', String(query.projectId))

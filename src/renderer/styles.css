@@ -270,3 +270,11 @@ button:disabled { cursor: not-allowed; }
 .log-project { flex: 0 0 110px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-endpoint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #57606a; }
 .log-error { flex: 0 1 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #cf222e; font-size: 12px; }
+.ai-verdict { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 12px; border-radius: 7px; font-size: 13px; max-width: 720px; }
+.ai-verdict.risk-high { background: #ffebe9; color: #cf222e; }
+.ai-verdict.risk-medium { background: #fff8c5; color: #7d4e00; }
+.ai-verdict.risk-low { background: #dafbe1; color: #1a7f37; }
+.risk-chip { padding: 1px 8px; border-radius: 10px; background: #ffffffaa; font-size: 11px; font-weight: 600; }
+.settings-section textarea { padding: 10px; border: 1px solid #8c959f; border-radius: 6px; font: inherit; resize: vertical; }
+.ai-test-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ai-test-row button { padding: 6px 12px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; }
