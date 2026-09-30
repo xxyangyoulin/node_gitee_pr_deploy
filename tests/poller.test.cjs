@@ -57,6 +57,12 @@ async function main() {
   const row2 = db.prepare('SELECT state FROM pr_cache WHERE number=2').get()
   check('合并状态落库', row2.state === 'merged')
 
+  // 4.5 新出现的已合并 PR 直接落 merged(不进 new)
+  PRS['owner/one'].push({ number: 3, title: 'already-merged', body: '', state: 'merged', merged: true, user: { name: 'carol' }, head: { ref: 'x', sha: 'ccc' }, base: { ref: 'master' }, created_at: '2026-09-19T10:00:00+08:00', updated_at: '2026-09-19T11:00:00+08:00' })
+  await pollProject(db, project)
+  const row3 = db.prepare('SELECT state FROM pr_cache WHERE number=3').get()
+  check('首轮已合并 PR 直接落 merged', row3.state === 'merged')
+
   // 5. pollAll:单项目失败隔离 + sync_state 记录
   const results = await pollAll(db)
   console.log('pollAll results:', JSON.stringify(results))

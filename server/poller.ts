@@ -40,10 +40,11 @@ export async function pollProject(database: DatabaseSync, project: Project) {
       gitee_updated_at: String(pull.updated_at ?? '').replace('T', ' ').slice(0, 19),
     }
     if (!existing) {
+      const initialState = giteeState !== 'open' ? giteeState : 'new'
       database.prepare(`INSERT INTO pr_cache(project_id,number,title,body,author,head_ref,base_ref,head_sha,raw,gitee_created_at,gitee_updated_at,first_seen_at,last_seen_at,synced_at,state,status_note)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new','')`)
-        .run(project.id, number, columns.title, columns.body, columns.author, columns.head_ref, columns.base_ref, columns.head_sha, columns.raw, columns.gitee_created_at, columns.gitee_updated_at, syncedAt, syncedAt, syncedAt)
-      changed += 1
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(project.id, number, columns.title, columns.body, columns.author, columns.head_ref, columns.base_ref, columns.head_sha, columns.raw, columns.gitee_created_at, columns.gitee_updated_at, syncedAt, syncedAt, syncedAt, initialState, '')
+      if (giteeState === 'open') changed += 1
     } else {
       let state = existing.state
       let statusNote = ''
