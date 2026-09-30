@@ -27,9 +27,6 @@ function switchPage(page: string) {
   if (location.hash !== `#/${page}`) location.hash = `#/${page}`
 }
 window.addEventListener('hashchange', () => { activePage.value = pageFromHash() })
-window.addEventListener('focus', () => {
-  if (activePage.value === 'pulls' && !loadingPulls.value && !oneClickRun.value?.running) loadPulls()
-})
 
 function notifyDesktop(title: string, body: string) {
   try {
