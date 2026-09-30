@@ -12,6 +12,7 @@
 | server_mode | `ssh` | `local` / `ssh` |
 | host / username | 空 | ssh 模式;编辑时下拉建议取自 deploy_targets 去重列表 |
 | workdir_template | `~/TEST/{project}_{pr}` | 测试项目位置,支持 `{project}` `{pr}` 变量 |
+| source_path | 空 | 本机已有项目目录(测试目录从它复制初始化;为空则回退到项目页配置的部署目标目录) |
 | commands | 预定义选项 JSON 数组 | 如 `[{"label":"全量","command":"vendor/bin/phpunit tests"},{"label":"单元","command":"vendor/bin/phpunit tests/Unit"}]`,至少一条;第一条为默认 |
 | ai_decides | 0 | 开启后由 AI 根据变更从选项中选择 |
 | ai_prompt | 空(内置默认) | AI 选择命令的提示词,变量同评估提示词 |
@@ -28,7 +29,7 @@ runTest(project, prRow, config, { manual }) →
   2. 组装命令序列:
      workdir = workdir_template 替换 {project}/{pr}
      cd {workdir}
-     [目录不存在] git clone https://oauth2:{token}@gitee.com/{repo}.git .
+     [目录不存在] cp -a {源仓库路径}/. {workdir}/   ← 从本机已有项目目录复制(含 .git 与已装依赖)
      git fetch --all --prune
      git checkout -f {head_sha}        ← 用 SHA 而非分支名(分支可能已删/被覆盖)
      {command}                          ← ai_decides 时由 AI 从预定义选项中选择(返回序号),失败/越界回退第一个选项

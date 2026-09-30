@@ -73,9 +73,9 @@ const settingsTab = ref<'general' | 'automation' | 'ai' | 'projects' | 'about'>(
 const aiTesting = ref(false)
 const aiTestMessage = ref('')
 const evaluatingPr = ref(false)
-const testConfigs = ref<Array<{ project_id: number; server_mode: string; host: string; username: string; workdir_template: string; commands: string; ai_decides: number; ai_prompt: string; timeout_sec: number; projectName: string }>>([])
+const testConfigs = ref<Array<{ project_id: number; server_mode: string; host: string; username: string; workdir_template: string; source_path: string; commands: string; ai_decides: number; ai_prompt: string; timeout_sec: number; projectName: string }>>([])
 const testModal = ref(false)
-const testForm = ref({ projectId: 0, projectName: '', serverMode: 'ssh', host: '', username: '', workdirTemplate: '~/TEST/{project}_{pr}', commandOptions: [{ label: '全量', command: 'vendor/bin/phpunit tests' }], aiDecides: false, aiPrompt: '', timeoutSec: 600 })
+const testForm = ref({ projectId: 0, projectName: '', serverMode: 'ssh', host: '', username: '', workdirTemplate: '~/TEST/{project}_{pr}', sourcePath: '', commandOptions: [{ label: '全量', command: 'vendor/bin/phpunit tests' }], aiDecides: false, aiPrompt: '', timeoutSec: 600 })
 const testFormError = ref('')
 const savingTest = ref(false)
 const runningTest = ref(false)
@@ -106,6 +106,7 @@ function openTestConfig(group: DeployGroup) {
     host: existing?.host ?? '',
     username: existing?.username ?? '',
     workdirTemplate: existing?.workdir_template ?? '~/TEST/{project}_{pr}',
+    sourcePath: existing?.source_path ?? '',
     commandOptions: options,
     aiDecides: !!existing?.ai_decides,
     aiPrompt: existing?.ai_prompt ?? '',
@@ -129,6 +130,7 @@ async function saveTestConfig() {
       host: testForm.value.host.trim(),
       username: testForm.value.username.trim(),
       workdirTemplate: testForm.value.workdirTemplate.trim(),
+      sourcePath: testForm.value.sourcePath.trim(),
       commands: JSON.stringify(testForm.value.commandOptions.map((option) => ({ label: option.label.trim(), command: option.command.trim() }))),
       aiDecides: testForm.value.aiDecides,
       aiPrompt: testForm.value.aiPrompt,
@@ -1404,6 +1406,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           <label>SSH 用户<input v-model="testForm.username" placeholder="deploy" /></label>
         </template>
         <label>测试项目位置(支持 {project} {pr} 变量)<input v-model="testForm.workdirTemplate" placeholder="~/TEST/{project}_{pr}" /></label>
+        <label>源项目目录(测试副本从此复制,含 .git 与已装依赖;留空回退部署目标目录)<input v-model="testForm.sourcePath" placeholder="如 /www/wwwroot/business" /></label>
         <div class="command-options">
           <div class="command-options-head"><span>测试命令选项(第一条为默认)</span><button type="button" @click="addCommandOption">+ 添加</button></div>
           <div v-for="(option, index) in testForm.commandOptions" :key="index" class="command-option-row">

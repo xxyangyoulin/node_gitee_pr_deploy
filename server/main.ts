@@ -21,7 +21,8 @@ try { database.exec('ALTER TABLE deployment_logs ADD COLUMN target_name TEXT NOT
 database.exec('CREATE TABLE IF NOT EXISTS deploy_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, name TEXT NOT NULL DEFAULT "", host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", remote_path TEXT NOT NULL DEFAULT "", command TEXT NOT NULL DEFAULT "", position INTEGER NOT NULL DEFAULT 0)')
 database.exec('CREATE TABLE IF NOT EXISTS pr_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL DEFAULT "", body TEXT NOT NULL DEFAULT "", author TEXT NOT NULL DEFAULT "", head_ref TEXT NOT NULL DEFAULT "", base_ref TEXT NOT NULL DEFAULT "", head_sha TEXT NOT NULL DEFAULT "", state TEXT NOT NULL DEFAULT "new", status_note TEXT NOT NULL DEFAULT "", raw TEXT NOT NULL DEFAULT "", gitee_created_at TEXT NOT NULL DEFAULT "", gitee_updated_at TEXT NOT NULL DEFAULT "", first_seen_at TEXT NOT NULL DEFAULT "", last_seen_at TEXT NOT NULL DEFAULT "", synced_at TEXT NOT NULL DEFAULT "", UNIQUE(project_id, number))')
 database.exec('CREATE TABLE IF NOT EXISTS sync_state (project_id INTEGER PRIMARY KEY, last_sync_at TEXT NOT NULL DEFAULT "", last_error TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1)')
-database.exec('CREATE TABLE IF NOT EXISTS test_configs (project_id INTEGER PRIMARY KEY, server_mode TEXT NOT NULL DEFAULT "ssh", host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", workdir_template TEXT NOT NULL DEFAULT "~/TEST/{project}_{pr}", commands TEXT NOT NULL DEFAULT "", ai_decides INTEGER NOT NULL DEFAULT 0, ai_prompt TEXT NOT NULL DEFAULT "", timeout_sec INTEGER NOT NULL DEFAULT 600)')
+database.exec('CREATE TABLE IF NOT EXISTS test_configs (project_id INTEGER PRIMARY KEY, server_mode TEXT NOT NULL DEFAULT "ssh", host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", workdir_template TEXT NOT NULL DEFAULT "~/TEST/{project}_{pr}", source_path TEXT NOT NULL DEFAULT "", commands TEXT NOT NULL DEFAULT "", ai_decides INTEGER NOT NULL DEFAULT 0, ai_prompt TEXT NOT NULL DEFAULT "", timeout_sec INTEGER NOT NULL DEFAULT 600)')
+try { database.exec('ALTER TABLE test_configs ADD COLUMN source_path TEXT NOT NULL DEFAULT ""') } catch { }
 try { database.exec('ALTER TABLE deployment_logs ADD COLUMN kind TEXT NOT NULL DEFAULT "deploy"') } catch { }
 try { database.exec('ALTER TABLE deployment_logs ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_result TEXT NOT NULL DEFAULT ""') } catch { }
@@ -44,6 +45,7 @@ database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY A
 
 import { setGiteeLogger } from './gitee.js'
 import { testModelConnection } from './ai.js'
+import { homedir } from 'node:os'
 import { runTest, type TestConfig } from './tester.js'
 {
   let logCounter = 0
@@ -164,8 +166,8 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   }
   if (path === '/api/test/configs' && request.method === 'GET') return json(response, 200, database.prepare('SELECT t.*, p.name AS projectName FROM test_configs t JOIN projects p ON p.id=t.project_id ORDER BY t.project_id DESC').all())
   if (path === '/api/test/configs' && request.method === 'POST') {
-    database.prepare('INSERT INTO test_configs(project_id,server_mode,host,username,workdir_template,commands,ai_decides,ai_prompt,timeout_sec) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET server_mode=excluded.server_mode,host=excluded.host,username=excluded.username,workdir_template=excluded.workdir_template,commands=excluded.commands,ai_decides=excluded.ai_decides,ai_prompt=excluded.ai_prompt,timeout_sec=excluded.timeout_sec')
-      .run(input.projectId, input.serverMode, input.host, input.username, input.workdirTemplate, input.commands, input.aiDecides ? 1 : 0, input.aiPrompt, input.timeoutSec)
+    database.prepare('INSERT INTO test_configs(project_id,server_mode,host,username,workdir_template,source_path,commands,ai_decides,ai_prompt,timeout_sec) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET server_mode=excluded.server_mode,host=excluded.host,username=excluded.username,workdir_template=excluded.workdir_template,source_path=excluded.source_path,commands=excluded.commands,ai_decides=excluded.ai_decides,ai_prompt=excluded.ai_prompt,timeout_sec=excluded.timeout_sec')
+      .run(input.projectId, input.serverMode, input.host, input.username, input.workdirTemplate, input.sourcePath ?? '', input.commands, input.aiDecides ? 1 : 0, input.aiPrompt, input.timeoutSec)
     return json(response, 200, input)
   }
   if (path === '/api/test/run' && request.method === 'POST') {
@@ -177,6 +179,12 @@ async function api(request: import('node:http').IncomingMessage, response: impor
     const config = database.prepare('SELECT * FROM test_configs WHERE project_id=?').get(projectId) as any
     if (!config) return json(response, 400, { message: '该项目未配置测试,请先在部署页配置' })
     if (config.server_mode === 'ssh' && (!config.host || !config.username)) return json(response, 400, { message: '测试服务器配置不完整' })
+    if (config.server_mode === 'local') {
+      const sourcePath = (config.source_path || '').replace(/^~(?=\/|$)/, homedir())
+      const deployTarget = database.prepare('SELECT remote_path FROM deploy_targets WHERE project_id=? ORDER BY position, id LIMIT 1').get(projectId) as any
+      const fallback = deployTarget?.remote_path ? deployTarget.remote_path.replace(/^~(?=\/|$)/, homedir()) : ''
+      if (!sourcePath && !fallback) return json(response, 400, { message: '未配置测试源目录(测试配置的 source_path 或部署目标目录),无法初始化测试副本' })
+    }
     database.prepare("UPDATE pr_cache SET state='testing' WHERE project_id=? AND number=?").run(projectId, number)
     response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' })
     const handle = runTest(database, config as TestConfig, { project: { id: prRow.id, name: prRow.name, repository: prRow.repository, token: prRow.token }, pr: { number: prRow.number, title: prRow.title, body: prRow.body, head_sha: prRow.headSha } }, (text) => response.write(text))

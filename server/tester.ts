@@ -12,6 +12,7 @@ export type TestConfig = {
   host: string
   username: string
   workdir_template: string
+  source_path: string
   commands: string
   ai_decides: number
   ai_prompt: string
@@ -70,21 +71,26 @@ async function fetchPrFiles(project: TestContext['project'], number: number) {
   return (await gitee({ repository: project.repository, token: project.token }, `pulls/${number}/files`)) as any[]
 }
 
-function buildScript(context: TestContext, config: TestConfig, command: string) {
+function buildScript(database: DatabaseSync, context: TestContext, config: TestConfig, command: string) {
   let workdir = (config.workdir_template || '~/TEST/{project}_{pr}')
     .replace(/^~(?=\/|$)/, homedir())
     .replaceAll('{project}', context.project.name)
     .replaceAll('{pr}', String(context.pr.number))
   if (workdir.startsWith('~')) workdir = homedir() + workdir.slice(1)
-  const cloneUrl = `https://oauth2:${context.project.token}@gitee.com/${context.project.repository}.git`
-  return [
-    `mkdir -p ${shellQuote(workdir)}`,
+  let source = (config.source_path || '').replace(/^~(?=\/|$)/, homedir())
+  if (!source) {
+    const deployRow = database.prepare('SELECT remote_path FROM deploy_targets WHERE project_id=? ORDER BY position, id LIMIT 1').get(config.project_id) as any
+    if (deployRow?.remote_path) source = deployRow.remote_path.replace(/^~(?=\/|$)/, homedir())
+  }
+  const steps = [`mkdir -p ${shellQuote(workdir)}`]
+  if (source) steps.push(`cp -a ${shellQuote(source)}/. ${shellQuote(workdir)}/`)
+  steps.push(
     `cd ${shellQuote(workdir)}`,
-    `if [ ! -d .git ]; then git clone ${shellQuote(cloneUrl)} . ; fi`,
     'git fetch --all --prune',
     `git checkout -f ${shellQuote(context.pr.head_sha || 'HEAD')}`,
     command,
-  ].join(' && ')
+  )
+  return steps.join(' && ')
 }
 
 function shellQuote(value: string) {
@@ -108,7 +114,7 @@ export function runTest(database: DatabaseSync, config: TestConfig, context: Tes
     try {
       const { option, note } = await pickCommand(database, config, context)
       if (note) output += `[${note}]\n`
-      const script = buildScript(context, config, option.command)
+      const script = buildScript(database, context, config, option.command)
       const result = await execute(config, script, (text) => { output += text; onChunk?.(text) })
       const hint = result === 127 ? '\n提示:命令不存在,可能需要先安装依赖(如 composer install / npm install)' : ''
       const marker = result === 0 ? '\n[测试通过]' : result === 'timeout' ? '\n[执行超时]' : `\n[测试失败,退出码 ${result}]${hint}`

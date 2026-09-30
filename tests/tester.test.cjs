@@ -46,7 +46,7 @@ async function main() {
   db.prepare("INSERT INTO settings (key,value) VALUES ('aiApiKey','sk-test')").run()
   db.prepare("INSERT INTO settings (key,value) VALUES ('aiModel','test-model')").run()
 
-  const config = { project_id: 1, server_mode: 'ssh', host: 'test.host', username: 'deployer', workdir_template: '~/TEST/{project}_{pr}', commands: JSON.stringify([{ label: '默认', command: 'vendor/bin/phpunit tests' }, { label: '定向', command: 'vendor/bin/phpunit --filter x' }]), ai_decides: 1, ai_prompt: '', timeout_sec: 600 }
+  const config = { project_id: 1, server_mode: 'ssh', host: 'test.host', username: 'deployer', workdir_template: '~/TEST/{project}_{pr}', source_path: '/srv/one', commands: JSON.stringify([{ label: '默认', command: 'vendor/bin/phpunit tests' }, { label: '定向', command: 'vendor/bin/phpunit --filter x' }]), ai_decides: 1, ai_prompt: '', timeout_sec: 600 }
   const context = { project: { id: 1, name: 'proj', repository: 'owner/proj', token: 'tok' }, pr: { number: 13, title: 't', body: '', head_sha: 'abc123' } }
 
   // 1. AI 选择:command_index 1 → 第二个选项
@@ -55,7 +55,6 @@ async function main() {
   const lastArgs = spawns[spawns.length - 1]
   const lastScript = lastArgs[1].join(' ')
   check('ssh 拼接主机与 BatchMode', lastArgs[0] === 'ssh' && lastScript.includes('deployer@test.host') && lastScript.includes('BatchMode=yes'))
-  check('脚本含条件 clone', lastScript.includes('git clone'))
   check('脚本含 fetch 与 checkout SHA', lastScript.includes('git fetch --all --prune') && lastScript.includes("checkout -f 'abc123'"))
   check('~ 展开为绝对家目录(不带引号问题)', lastScript.includes("mkdir -p '/home/") && !lastScript.includes("mkdir -p '~"))
   check('AI 选中第二个命令(--filter)', lastScript.includes('phpunit --filter x'))
