@@ -19,6 +19,7 @@ interface Window {
     refreshPulls(projectId?: number): Promise<{ results: Array<{ projectId: number; name: string; error: string }> }>
     syncStatus(): Promise<Array<{ projectId: number; name: string; lastSyncAt: string; lastError: string; enabled: number }>>
     testAiConnection(input: { aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string }): Promise<{ message: string }>
+    evaluatePr(input: { projectId: number; number: number }): Promise<{ verdict: { needs_test: boolean; reason: string; risk_level: string } }>
     requestLogs(query?: { projectId?: number; status?: string; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; endpoint: string; method: string; ok: number; status: number; errorMessage: string; durationMs: number; createdAt: string }>>
     toggleSync(projectId: number, enabled: boolean): Promise<unknown>
     pullRequestDetail(input: { repository: string; token: string; number: number }): Promise<any>

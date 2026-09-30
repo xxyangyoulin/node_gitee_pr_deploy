@@ -100,44 +100,59 @@ export async function pollAll(database: DatabaseSync, projectId = 0) {
   return results
 }
 
-export async function evaluatePending(database: DatabaseSync) {
+function readAiSettings(database: DatabaseSync) {
   const settingsRows = database.prepare("SELECT key, value FROM settings").all() as Array<{ key: string; value: string }>
   const stored: Record<string, string> = Object.fromEntries(settingsRows.map((row) => [row.key, row.value]))
+  return { stored, aiSettings: { aiBaseUrl: stored.aiBaseUrl, aiApiKey: stored.aiApiKey, aiModel: stored.aiModel, aiPrompt: stored.aiPrompt || DEFAULT_PROMPT } as AiSettings }
+}
+
+export async function evaluateRow(database: DatabaseSync, row: any) {
+  const { aiSettings } = readAiSettings(database)
+  database.prepare("UPDATE pr_cache SET state='ai_reviewing' WHERE id=?").run(row.id)
+  try {
+    const files = await gitee({ repository: row.repository, token: row.token }, `pulls/${row.number}/files`) as any[]
+    let verdict
+    if (files.some((file) => String(file.filename ?? '').toLowerCase().endsWith('.sql'))) {
+      verdict = { needs_test: true, reason: '包含 SQL 变更', risk_level: 'high' }
+    } else {
+      if (!aiSettings.aiApiKey || !aiSettings.aiBaseUrl || !aiSettings.aiModel) throw new Error('未配置 AI 模型')
+      const input = buildEvaluationInput(files)
+      const prompt = renderPrompt(aiSettings.aiPrompt, { title: row.title, body: row.body, files: input.files, diff: input.diff })
+      try {
+        verdict = await callModel(aiSettings, prompt)
+      } catch {
+        try { verdict = await callModel(aiSettings, prompt) } catch (error) {
+          verdict = { needs_test: true, reason: `AI 评估失败,默认需要测试:${error instanceof Error ? error.message : '未知错误'}`, risk_level: 'medium' }
+        }
+      }
+    }
+    database.prepare("UPDATE pr_cache SET state=?, status_note=?, ai_result=?, ai_evaluated_at=? WHERE id=?")
+      .run(verdict.needs_test ? 'needs_test' : 'no_test_needed', verdict.reason, JSON.stringify(verdict), now(), row.id)
+    return verdict
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '评估失败'
+    database.prepare("UPDATE pr_cache SET state='new', status_note=?, ai_result='' WHERE id=?").run(`评估中断:${message}`.slice(0, 300), row.id)
+    throw error
+  }
+}
+
+export async function evaluatePending(database: DatabaseSync) {
+  const { stored } = readAiSettings(database)
   if (stored.automationEnabled !== '1') return
   if (!stored.aiApiKey || !stored.aiBaseUrl || !stored.aiModel) return
-  const aiSettings: AiSettings = {
-    aiBaseUrl: stored.aiBaseUrl,
-    aiApiKey: stored.aiApiKey,
-    aiModel: stored.aiModel,
-    aiPrompt: stored.aiPrompt || DEFAULT_PROMPT,
-  }
   const pending = database.prepare("SELECT c.id, c.project_id, c.number, c.title, c.body, c.head_sha AS headSha, c.ai_result AS aiResult, p.repository, p.token FROM pr_cache c JOIN projects p ON p.id=c.project_id WHERE c.state='new' ORDER BY c.first_seen_at LIMIT 5").all() as any[]
   for (const row of pending) {
     if (row.aiResult) continue // 同 SHA 已评估过,跳过
-    database.prepare("UPDATE pr_cache SET state='ai_reviewing' WHERE id=?").run(row.id)
-    try {
-      const files = await gitee({ repository: row.repository, token: row.token }, `pulls/${row.number}/files`) as any[]
-      let verdict
-      if (files.some((file) => String(file.filename ?? '').toLowerCase().endsWith('.sql'))) {
-        verdict = { needs_test: true, reason: '包含 SQL 变更', risk_level: 'high' }
-      } else {
-        const input = buildEvaluationInput(files)
-        const prompt = renderPrompt(aiSettings.aiPrompt, { title: row.title, body: row.body, files: input.files, diff: input.diff })
-        try {
-          verdict = await callModel(aiSettings, prompt)
-        } catch {
-          try { verdict = await callModel(aiSettings, prompt) } catch (error) {
-            verdict = { needs_test: true, reason: `AI 评估失败,默认需要测试:${error instanceof Error ? error.message : '未知错误'}`, risk_level: 'medium' }
-          }
-        }
-      }
-      database.prepare("UPDATE pr_cache SET state=?, status_note=?, ai_result=?, ai_evaluated_at=? WHERE id=?")
-        .run(verdict.needs_test ? 'needs_test' : 'no_test_needed', verdict.reason, JSON.stringify(verdict), now(), row.id)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '评估失败'
-      database.prepare("UPDATE pr_cache SET state='new', status_note=? WHERE id=?").run(`评估中断:${message}`.slice(0, 300), row.id)
-    }
+    try { await evaluateRow(database, row) } catch { /* 单条失败已回写状态 */ }
   }
+}
+
+export async function evaluateManual(database: DatabaseSync, projectId: number, number: number) {
+  const row = database.prepare("SELECT c.id, c.project_id, c.number, c.title, c.body, c.head_sha AS headSha, c.state, p.repository, p.token FROM pr_cache c JOIN projects p ON p.id=c.project_id WHERE c.project_id=? AND c.number=?").get(projectId, number) as any
+  if (!row) throw new Error('PR 不在缓存中')
+  if (row.state === 'ai_reviewing') throw new Error('AI 评审进行中，请稍后再试')
+  database.prepare("UPDATE pr_cache SET ai_result='' WHERE id=?").run(row.id)
+  return evaluateRow(database, row)
 }
 
 export function startPoller(database: DatabaseSync) {

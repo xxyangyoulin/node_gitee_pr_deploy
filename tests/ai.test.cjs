@@ -31,7 +31,7 @@ globalThis.fetch = async (url) => {
 }
 
 async function main() {
-  const { pollProject, evaluatePending } = await import('../dist-server/poller.js')
+  const { pollProject, evaluatePending, evaluateManual } = await import('../dist-server/poller.js')
   const db = new DatabaseSync(':memory:')
   db.exec("CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT, repository TEXT, token TEXT DEFAULT '', open_prs INTEGER DEFAULT 0)")
   db.exec("CREATE TABLE pr_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, number INTEGER NOT NULL, title TEXT DEFAULT '', body TEXT DEFAULT '', author TEXT DEFAULT '', head_ref TEXT DEFAULT '', base_ref TEXT DEFAULT '', head_sha TEXT DEFAULT '', state TEXT DEFAULT 'new', status_note TEXT DEFAULT '', raw TEXT DEFAULT '', gitee_created_at TEXT DEFAULT '', gitee_updated_at TEXT DEFAULT '', first_seen_at TEXT DEFAULT '', last_seen_at TEXT DEFAULT '', synced_at TEXT DEFAULT '', ai_result TEXT DEFAULT '', ai_evaluated_at TEXT DEFAULT '', UNIQUE(project_id, number))")
@@ -78,6 +78,21 @@ async function main() {
   await evaluatePending(db)
   const degraded = db.prepare('SELECT state, status_note n FROM pr_cache WHERE number=1').get()
   check('连续失败降级 needs_test', degraded.state === 'needs_test' && degraded.n.includes('默认需要测试'))
+
+  // 7. 自动化进行中(ai_reviewing)手动评审被拒绝
+  db.prepare("UPDATE pr_cache SET state='ai_reviewing', ai_result='' WHERE number=3").run()
+  try {
+    await evaluateManual(db, 1, 3)
+    check('ai_reviewing 时手动评审被拒', false)
+  } catch (error) {
+    check('ai_reviewing 时手动评审被拒', String(error.message).includes('进行中'))
+  }
+
+  // 8. 自动化完成后可手动重新评审
+  db.prepare("UPDATE pr_cache SET state='needs_test', ai_result='{}' WHERE number=3").run()
+  state.aiFailAlways = false
+  await evaluateManual(db, 1, 3)
+  check('完成后可手动重新评审', db.prepare('SELECT state FROM pr_cache WHERE number=3').get().state === 'no_test_needed')
 
   // 6. 输入截断:60+ 文件清单与超长 diff
   PR_FILES_BY_PR[1] = Array.from({ length: 70 }, (_, i) => ({ filename: `src/f${i}.ts`, patch: '+x'.repeat(50) }))

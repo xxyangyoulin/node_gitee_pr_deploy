@@ -10,7 +10,7 @@ const PRS_TWO = [
   { number: 12, title: 'two fix', user: { login: 'carol' }, head: { ref: 'fix-y' }, base: { ref: 'master' }, created_at: '2026-09-27T23:59:00+08:00' },
   { number: 11, title: 'two feature', user: { login: 'bob' }, head: { ref: 'feat-x' }, base: { ref: 'main' }, created_at: '2026-09-25T08:05:00+08:00' },
 ]
-const saved = { approves: [], merges: [], tests: [], creates: [], runs: [] }
+const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [] }
 const mergedNumbers = []
 let createdNumber = 13
 let merge14Failed = false
@@ -53,7 +53,7 @@ function check(name, cond) {
           headRef: pull.head?.ref || '',
           baseRef: pull.base?.ref || '',
           headSha: pull.head?.sha || '',
-          state: (pull.state ?? 'open') === 'open' ? (pull.number === 13 ? 'needs_test' : 'new') : (pull.state || 'new'),
+          state: (pull.state ?? 'open') === 'open' ? (pull.number === 13 ? 'needs_test' : pull.number === 12 ? 'ai_reviewing' : 'new') : (pull.state || 'new'),
           statusNote: pull.number === 13 ? '包含 SQL 变更' : '',
           aiResult: pull.number === 13 ? JSON.stringify({ needs_test: true, reason: '包含 SQL 变更', risk_level: 'high' }) : '',
           aiEvaluatedAt: '',
@@ -61,6 +61,12 @@ function check(name, cond) {
           updatedAt: pull.created_at,
         }]
       }) })
+    }
+    if (path === '/api/pr/evaluate') {
+      const input = req.postDataJSON()
+      saved.evaluates.push(input)
+      const verdict = { needs_test: input.number === 13, reason: input.number === 13 ? '包含 SQL 变更' : '文档变更无需测试', risk_level: input.number === 13 ? 'high' : 'low' }
+      return route.fulfill({ json: { verdict } })
     }
     if (path === '/api/pulls/refresh') {
       if (projTwoPullsFail) return route.fulfill({ json: { results: [{ projectId: 2, name: 'proj-two', error: 'mock token 失效' }] } })
@@ -148,13 +154,21 @@ function check(name, cond) {
   check('选中行高亮', (await page.locator('.pr-item.selected').count()) === 1)
   check('标题栏显示已选 PR', (await page.locator('.page-heading .selected-project-badge').textContent()) === 'proj-two' && (await page.locator('.page-heading .selected-pr-ref').textContent()).includes('#13'))
   check('标题栏项目徽章为紫色高亮', (await page.locator('.page-heading .selected-project-badge').evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(251, 239, 255)')
-  const verdict = page.locator('.ai-verdict')
-  check('AI 结论条展示', (await verdict.count()) === 1 && (await verdict.textContent()).includes('需要测试') && (await verdict.textContent()).includes('包含 SQL 变更'))
-  check('高风险结论条红色', (await verdict.evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(255, 235, 233)')
+  const aiRow = page.locator('.automation-row').first()
+  check('自动化面板 AI 行展示结论', (await aiRow.textContent()).includes('需要测试') && (await aiRow.textContent()).includes('包含 SQL 变更'))
+  check('高风险结论红色徽章', (await aiRow.locator('.verdict-chip').evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(255, 235, 233)')
+  check('测试行显示未执行', (await page.locator('.automation-row').nth(1).textContent()).includes('未执行'))
+  check('人工标记按钮在面板', (await page.locator('.automation-row').nth(2).locator('button').count()) === 2)
   check('待测试徽章显示', (await page.locator('.pr-item.selected .state-badge').textContent()) === '待测试')
 
   const oneClickBtn = page.locator('.heading-actions button', { hasText: '一键 master' })
   check('非 dock→dock 显示一键 master', (await oneClickBtn.count()) === 1)
+
+  // 手动重新评审
+  await page.locator('.automation-row').first().locator('button', { hasText: '重新评审' }).click()
+  await page.waitForTimeout(300)
+  check('手动评审请求发出', saved.evaluates.at(-1)?.projectId === 2 && saved.evaluates.at(-1)?.number === 13)
+  check('评审结论即时更新', (await page.locator('.automation-row').first().textContent()).includes('包含 SQL 变更'))
 
   // 一键部署:两击确认 → 进度弹窗在当前页显示步骤与部署日志
   const oneDeployBtn = page.locator('.heading-actions button.one-click', { hasText: '一键部署' })
@@ -211,6 +225,8 @@ function check(name, cond) {
   // 普通 PR 两击合并(确认超时还原)
   await page.locator('.pr-item', { hasText: '#12' }).click()
   await page.waitForTimeout(400)
+  check('自动化评审中时面板显示评审中', (await page.locator('.automation-row').first().textContent()).includes('评审中'))
+  check('自动化评审中时手动按钮禁用', await page.locator('.automation-row').first().locator('button').first().isDisabled())
   const mergeBtn = page.locator('.merge-action')
   const mergesBefore = saved.merges.length
   await mergeBtn.click()

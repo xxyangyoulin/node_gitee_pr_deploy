@@ -4,7 +4,7 @@ import { extname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
 import { gitee } from './gitee.js'
-import { startPoller, pollAll } from './poller.js'
+import { startPoller, pollAll, evaluateManual } from './poller.js'
 
 const port = Number(process.env.PORT) || 18763
 const root = process.cwd()
@@ -149,6 +149,12 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   if (path === '/api/sync/status' && request.method === 'GET') {
     const rows = database.prepare('SELECT s.project_id AS projectId, p.name, s.last_sync_at AS lastSyncAt, s.last_error AS lastError, s.enabled FROM sync_state s JOIN projects p ON p.id=s.project_id ORDER BY s.project_id DESC').all()
     return json(response, 200, rows)
+  }
+  if (path === '/api/pr/evaluate' && request.method === 'POST') {
+    try {
+      const verdict = await evaluateManual(database, Number(input.projectId), Number(input.number))
+      return json(response, 200, { verdict })
+    } catch (error) { return json(response, 500, { message: error instanceof Error ? error.message : '评估失败' }) }
   }
   if (path === '/api/ai/test' && request.method === 'POST') {
     const aiSettings = { aiBaseUrl: String(input.aiBaseUrl ?? ''), aiApiKey: String(input.aiApiKey ?? ''), aiModel: String(input.aiModel ?? ''), aiPrompt: String(input.aiPrompt ?? '') }
