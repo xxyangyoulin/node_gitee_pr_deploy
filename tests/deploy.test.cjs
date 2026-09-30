@@ -13,7 +13,7 @@ const targets = [
   { id: 12, projectId: 1, projectName: 'proj-one', name: 'web-2', host: 'b.org', username: 'root', remotePath: '/srv/two', command: './ship.sh', position: 1 },
 ]
 const deployLogs = [{ id: 1, projectId: 1, projectName: 'proj-one', targetName: 'web-1', host: 'deploy@a.com', output: '历史输出', success: 1, createdAt: '2026-09-01 10:00:00' }]
-const saved = { targets: [], deletes: [], runs: [], reorders: [] }
+const saved = { targets: [], deletes: [], runs: [], reorders: [], testConfigs: [] }
 let failures = 0
 
 function check(name, cond) {
@@ -56,6 +56,16 @@ function check(name, cond) {
       return route.fulfill({ json: {} })
     }
     if (url.pathname === '/api/deployment/servers') return route.fulfill({ json: SERVERS })
+    const testConfigsStore = [{ project_id: 1, server_mode: 'ssh', host: 'a.com', username: 'deploy', workdir_template: '~/TEST/{project}_{pr}', commands: JSON.stringify([{ label: '全量', command: 'vendor/bin/phpunit tests' }]), ai_decides: 0, ai_prompt: '', timeout_sec: 600, projectName: 'proj-one' }]
+    if (url.pathname === '/api/test/configs' && req.method() === 'GET') return route.fulfill({ json: testConfigsStore.map((row) => ({ ...row })) })
+    if (url.pathname === '/api/test/configs' && req.method() === 'POST') {
+      const input = req.postDataJSON()
+      saved.testConfigs.push(input)
+      const row = testConfigsStore.find((item) => item.project_id === input.projectId)
+      const mapped = { project_id: input.projectId, server_mode: input.serverMode, host: input.host, username: input.username, workdir_template: input.workdirTemplate, commands: input.commands, ai_decides: input.aiDecides ? 1 : 0, ai_prompt: input.aiPrompt, timeout_sec: input.timeoutSec, projectName: input.projectId === 1 ? 'proj-one' : 'proj-two' }
+      if (row) Object.assign(row, mapped); else testConfigsStore.push(mapped)
+      return route.fulfill({ json: input })
+    }
     if (url.pathname === '/api/deployment/run') {
       const targetId = req.postDataJSON().targetId
       saved.runs.push(targetId)
@@ -136,6 +146,22 @@ function check(name, cond) {
   await page.waitForTimeout(300)
   check('删除请求携带目标 12', saved.deletes.at(-1) === 12)
   check('删除后 proj-one 仅剩 1 行', (await page.locator('.deploy-group').first().locator('.deploy-target-row').count()) === 1)
+
+  // 测试配置:proj-one 已配置(按钮高亮),proj-two 打开弹窗保存
+  check('已配置项目按钮高亮', (await page.locator('.deploy-group').first().locator('button.primary', { hasText: '测试配置' }).count()) === 1)
+  await page.locator('.deploy-group').last().locator('button', { hasText: '配置测试' }).click()
+  const tmodal = page.locator('.test-config-modal')
+  check('测试配置弹窗打开', await tmodal.isVisible())
+  await tmodal.locator('.command-option-row input').first().fill('单元')
+  await tmodal.locator('.command-option-row input').nth(1).fill('vendor/bin/phpunit tests/Unit')
+  await tmodal.locator('.command-options-head button').click()
+  await tmodal.locator('.command-option-row').nth(1).locator('input').first().fill('全量')
+  await tmodal.locator('.command-option-row').nth(1).locator('input').nth(1).fill('vendor/bin/phpunit tests')
+  await tmodal.locator('button[type=submit]').click()
+  await page.waitForTimeout(300)
+  const savedConfig = saved.testConfigs.at(-1)
+  check('保存测试配置写入项目 2', savedConfig?.projectId === 2 && savedConfig?.serverMode === 'ssh')
+  check('命令选项保存为 JSON 数组', JSON.parse(savedConfig.commands).length === 2 && JSON.parse(savedConfig.commands)[0].label === '单元')
 
   // 单台执行 + 日志
   await page.locator('.deploy-target-row').first().locator('button', { hasText: '执行' }).click()

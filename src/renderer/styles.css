@@ -296,3 +296,13 @@ button:disabled { cursor: not-allowed; }
 .automation-action { flex: 0 0 auto; padding: 4px 12px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; font-size: 12px; }
 .automation-action:hover:not(:disabled) { border-color: #0969da; color: #0969da; }
 .automation-action.passed { background: #dafbe1; border-color: #9be9a8; color: #1a7f37; }
+.test-config-modal { width: 560px; max-height: 86vh; overflow-y: auto; }
+.command-options-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; margin: 10px 0 6px; }
+.command-options-head button { padding: 3px 10px; border: 1px solid #d0d7de; border-radius: 5px; background: #fff; font-size: 12px; }
+.command-option-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.command-option-row input:first-child { flex: 0 0 130px; }
+.command-option-row input { flex: 1; padding: 7px 9px; border: 1px solid #8c959f; border-radius: 5px; }
+.command-option-row button { flex: 0 0 auto; padding: 4px 10px; border: 1px solid #d0d7de; border-radius: 5px; background: #fff; color: #cf222e; font-size: 12px; }
+.checkbox-label { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px !important; }
+.test-output-row { padding: 0 14px 10px; }
+.automation-test-output { height: 180px; margin: 0; padding: 10px; overflow: auto; background: #24292f; color: #e6edf3; font-family: 'JetBrains Mono', monospace; white-space: pre-wrap; font-size: 12px; border-radius: 6px; }

@@ -61,6 +61,27 @@ window.releaseConsole = {
   syncStatus: () => request('/api/sync/status'),
   testAiConnection: (input) => request('/api/ai/test', { method: 'POST', body: JSON.stringify(input) }),
   evaluatePr: (input) => request('/api/pr/evaluate', { method: 'POST', body: JSON.stringify(input) }),
+  listTestConfigs: () => request('/api/test/configs'),
+  saveTestConfig: (input) => request('/api/test/configs', { method: 'POST', body: JSON.stringify(input) }),
+  runPrTest: async (input, onChunk) => {
+    const response = await fetch('/api/test/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+    if (!response.ok) {
+      let message = `请求失败: ${response.status}`
+      try { message = (await response.json()).message || message } catch { }
+      throw new Error(message)
+    }
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let output = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const text = decoder.decode(value, { stream: true })
+      output += text
+      onChunk?.(text)
+    }
+    return output
+  },
   requestLogs: (query: { projectId?: number; status?: string; limit?: number } = {}) => {
     const params = new URLSearchParams()
     if (query.projectId) params.set('projectId', String(query.projectId))

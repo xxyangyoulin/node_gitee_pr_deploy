@@ -19,6 +19,9 @@ try { database.exec('ALTER TABLE deployment_logs ADD COLUMN target_name TEXT NOT
 database.exec('CREATE TABLE IF NOT EXISTS deploy_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, name TEXT NOT NULL DEFAULT "", host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", remote_path TEXT NOT NULL DEFAULT "", command TEXT NOT NULL DEFAULT "", position INTEGER NOT NULL DEFAULT 0)')
 database.exec('CREATE TABLE IF NOT EXISTS pr_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL DEFAULT "", body TEXT NOT NULL DEFAULT "", author TEXT NOT NULL DEFAULT "", head_ref TEXT NOT NULL DEFAULT "", base_ref TEXT NOT NULL DEFAULT "", head_sha TEXT NOT NULL DEFAULT "", state TEXT NOT NULL DEFAULT "new", status_note TEXT NOT NULL DEFAULT "", raw TEXT NOT NULL DEFAULT "", gitee_created_at TEXT NOT NULL DEFAULT "", gitee_updated_at TEXT NOT NULL DEFAULT "", first_seen_at TEXT NOT NULL DEFAULT "", last_seen_at TEXT NOT NULL DEFAULT "", synced_at TEXT NOT NULL DEFAULT "", UNIQUE(project_id, number))')
 database.exec('CREATE TABLE IF NOT EXISTS sync_state (project_id INTEGER PRIMARY KEY, last_sync_at TEXT NOT NULL DEFAULT "", last_error TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1)')
+database.exec('CREATE TABLE IF NOT EXISTS test_configs (project_id INTEGER PRIMARY KEY, server_mode TEXT NOT NULL DEFAULT "ssh", host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", workdir_template TEXT NOT NULL DEFAULT "~/TEST/{project}_{pr}", commands TEXT NOT NULL DEFAULT "", ai_decides INTEGER NOT NULL DEFAULT 0, ai_prompt TEXT NOT NULL DEFAULT "", timeout_sec INTEGER NOT NULL DEFAULT 600)')
+try { database.exec('ALTER TABLE deployment_logs ADD COLUMN kind TEXT NOT NULL DEFAULT "deploy"') } catch { }
+try { database.exec('ALTER TABLE deployment_logs ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_result TEXT NOT NULL DEFAULT ""') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_evaluated_at TEXT NOT NULL DEFAULT ""') } catch { }
 database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL DEFAULT 0, project_name TEXT NOT NULL DEFAULT "", endpoint TEXT NOT NULL DEFAULT "", method TEXT NOT NULL DEFAULT "GET", ok INTEGER NOT NULL DEFAULT 1, status INTEGER NOT NULL DEFAULT 0, error_message TEXT NOT NULL DEFAULT "", duration_ms INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
@@ -38,6 +41,7 @@ database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY A
 
 import { setGiteeLogger } from './gitee.js'
 import { testModelConnection } from './ai.js'
+import { runTest, type TestConfig } from './tester.js'
 {
   let logCounter = 0
   setGiteeLogger((entry) => {
@@ -109,10 +113,15 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   if (path === '/api/deployment/logs' && request.method === 'GET') {
     const params = new URL(request.url || '', 'http://localhost').searchParams
     const projectId = Number(params.get('projectId')) || 0
+    void 0
     const limit = Math.min(Number(params.get('limit')) || 20, 100)
-    const rows = projectId
-      ? database.prepare('SELECT id, project_id AS projectId, project_name AS projectName, target_name, host, output, success, created_at AS createdAt FROM deployment_logs WHERE project_id=? ORDER BY id DESC LIMIT ?').all(projectId, limit)
-      : database.prepare('SELECT id, project_id AS projectId, project_name AS projectName, target_name, host, output, success, created_at AS createdAt FROM deployment_logs ORDER BY id DESC LIMIT ?').all(limit)
+    const kind = params.get('kind')
+    const conditions: string[] = []
+    const args: any[] = []
+    if (projectId) { conditions.push('project_id=?'); args.push(projectId) }
+    if (kind === 'test' || kind === 'deploy') { conditions.push('kind=?'); args.push(kind) }
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''
+    const rows = database.prepare(`SELECT id, project_id AS projectId, project_name AS projectName, target_name, kind, pr_number AS prNumber, host, output, success, created_at AS createdAt FROM deployment_logs${where} ORDER BY id DESC LIMIT ?`).all(...args, limit)
     return json(response, 200, rows)
   }
   if (path === '/api/deployment/servers' && request.method === 'GET') return json(response, 200, database.prepare("SELECT host,username FROM deploy_targets WHERE host != '' GROUP BY host").all())
@@ -149,6 +158,27 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   if (path === '/api/sync/status' && request.method === 'GET') {
     const rows = database.prepare('SELECT s.project_id AS projectId, p.name, s.last_sync_at AS lastSyncAt, s.last_error AS lastError, s.enabled FROM sync_state s JOIN projects p ON p.id=s.project_id ORDER BY s.project_id DESC').all()
     return json(response, 200, rows)
+  }
+  if (path === '/api/test/configs' && request.method === 'GET') return json(response, 200, database.prepare('SELECT t.*, p.name AS projectName FROM test_configs t JOIN projects p ON p.id=t.project_id ORDER BY t.project_id DESC').all())
+  if (path === '/api/test/configs' && request.method === 'POST') {
+    database.prepare('INSERT INTO test_configs(project_id,server_mode,host,username,workdir_template,commands,ai_decides,ai_prompt,timeout_sec) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET server_mode=excluded.server_mode,host=excluded.host,username=excluded.username,workdir_template=excluded.workdir_template,commands=excluded.commands,ai_decides=excluded.ai_decides,ai_prompt=excluded.ai_prompt,timeout_sec=excluded.timeout_sec')
+      .run(input.projectId, input.serverMode, input.host, input.username, input.workdirTemplate, input.commands, input.aiDecides ? 1 : 0, input.aiPrompt, input.timeoutSec)
+    return json(response, 200, input)
+  }
+  if (path === '/api/test/run' && request.method === 'POST') {
+    const projectId = Number(input.projectId)
+    const number = Number(input.number)
+    const prRow = database.prepare('SELECT c.number, c.title, c.body, c.head_sha AS headSha, c.state, p.id, p.name, p.repository, p.token FROM pr_cache c JOIN projects p ON p.id=c.project_id WHERE c.project_id=? AND c.number=?').get(projectId, number) as any
+    if (!prRow) return json(response, 404, { message: 'PR 不在缓存中' })
+    if (prRow.state === 'testing') return json(response, 409, { message: '测试进行中,请稍后再试' })
+    const config = database.prepare('SELECT * FROM test_configs WHERE project_id=?').get(projectId) as any
+    if (!config) return json(response, 400, { message: '该项目未配置测试,请先在部署页配置' })
+    if (config.server_mode === 'ssh' && (!config.host || !config.username)) return json(response, 400, { message: '测试服务器配置不完整' })
+    database.prepare("UPDATE pr_cache SET state='testing' WHERE project_id=? AND number=?").run(projectId, number)
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' })
+    const handle = runTest(database, config as TestConfig, { project: { id: prRow.id, name: prRow.name, repository: prRow.repository, token: prRow.token }, pr: { number: prRow.number, title: prRow.title, body: prRow.body, head_sha: prRow.headSha } }, (text) => response.write(text))
+    handle.promise.then(() => response.end()).catch((error) => { response.write(`\n[错误] ${error instanceof Error ? error.message : '执行失败'}`); response.end() })
+    return
   }
   if (path === '/api/pr/evaluate' && request.method === 'POST') {
     try {

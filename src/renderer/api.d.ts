@@ -20,6 +20,9 @@ interface Window {
     syncStatus(): Promise<Array<{ projectId: number; name: string; lastSyncAt: string; lastError: string; enabled: number }>>
     testAiConnection(input: { aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string }): Promise<{ message: string }>
     evaluatePr(input: { projectId: number; number: number }): Promise<{ verdict: { needs_test: boolean; reason: string; risk_level: string } }>
+    listTestConfigs(): Promise<Array<{ project_id: number; server_mode: string; host: string; username: string; workdir_template: string; commands: string; ai_decides: number; ai_prompt: string; timeout_sec: number; projectName: string }>>
+    saveTestConfig(input: { projectId: number; serverMode: string; host: string; username: string; workdirTemplate: string; commands: string; aiDecides: boolean; aiPrompt: string; timeoutSec: number }): Promise<unknown>
+    runPrTest(input: { projectId: number; number: number }, onChunk?: (text: string) => void): Promise<string>
     requestLogs(query?: { projectId?: number; status?: string; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; endpoint: string; method: string; ok: number; status: number; errorMessage: string; durationMs: number; createdAt: string }>>
     toggleSync(projectId: number, enabled: boolean): Promise<unknown>
     pullRequestDetail(input: { repository: string; token: string; number: number }): Promise<any>

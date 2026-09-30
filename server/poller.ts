@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { gitee } from './gitee.js'
 import { buildEvaluationInput, callModel, renderPrompt, DEFAULT_PROMPT, type AiSettings } from './ai.js'
+import { runTest, type TestConfig } from './tester.js'
 
 type Project = { id: number; name: string; repository: string; token: string }
 type PullRow = any
@@ -155,6 +156,19 @@ export async function evaluateManual(database: DatabaseSync, projectId: number, 
   return evaluateRow(database, row)
 }
 
+export async function runPendingTests(database: DatabaseSync) {
+  const stored: Record<string, string> = Object.fromEntries((database.prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>).map((row) => [row.key, row.value]))
+  if (stored.automationEnabled !== '1') return
+  const pending = database.prepare("SELECT c.project_id, c.number, c.title, c.body, c.head_sha AS headSha, p.name, p.repository, p.token FROM pr_cache c JOIN projects p ON p.id=c.project_id WHERE c.state='needs_test' ORDER BY c.first_seen_at LIMIT 2").all() as any[]
+  for (const row of pending) {
+    const config = database.prepare('SELECT * FROM test_configs WHERE project_id=?').get(row.project_id) as any
+    if (!config) continue
+    if (config.server_mode === 'ssh' && (!config.host || !config.username)) continue
+    database.prepare("UPDATE pr_cache SET state='testing' WHERE project_id=? AND number=?").run(row.project_id, row.number)
+    void runTest(database, config as TestConfig, { project: { id: row.project_id, name: row.name, repository: row.repository, token: row.token }, pr: { number: row.number, title: row.title, body: row.body, head_sha: row.headSha } }).promise.catch(() => { })
+  }
+}
+
 export function startPoller(database: DatabaseSync) {
   let running = false
   let timer: ReturnType<typeof setInterval> | undefined
@@ -164,6 +178,7 @@ export function startPoller(database: DatabaseSync) {
     try {
       await pollAll(database)
       await evaluatePending(database)
+      await runPendingTests(database)
     } finally { running = false }
   }
   const schedule = () => {

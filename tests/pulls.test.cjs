@@ -10,7 +10,7 @@ const PRS_TWO = [
   { number: 12, title: 'two fix', user: { login: 'carol' }, head: { ref: 'fix-y' }, base: { ref: 'master' }, created_at: '2026-09-27T23:59:00+08:00' },
   { number: 11, title: 'two feature', user: { login: 'bob' }, head: { ref: 'feat-x' }, base: { ref: 'main' }, created_at: '2026-09-25T08:05:00+08:00' },
 ]
-const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [] }
+const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [], testRuns: [] }
 const mergedNumbers = []
 let createdNumber = 13
 let merge14Failed = false
@@ -62,6 +62,8 @@ function check(name, cond) {
         }]
       }) })
     }
+    if (path === '/api/test/configs') return route.fulfill({ json: [{ project_id: 2, server_mode: 'ssh', host: 'a.com', username: 'deploy', workdir_template: '~/TEST/{project}_{pr}', commands: '[{"label":"全量","command":"vendor/bin/phpunit tests"}]', ai_decides: 0, ai_prompt: '', timeout_sec: 600, projectName: 'proj-two' }] })
+    if (path === '/api/test/run') { saved.testRuns.push(req.postDataJSON()); return route.fulfill({ json: 'running...\n[测试通过]' }) }
     if (path === '/api/pr/evaluate') {
       const input = req.postDataJSON()
       saved.evaluates.push(input)
@@ -163,6 +165,15 @@ function check(name, cond) {
 
   const oneClickBtn = page.locator('.heading-actions button', { hasText: '一键 master' })
   check('非 dock→dock 显示一键 master', (await oneClickBtn.count()) === 1)
+
+  // 发起测试
+  const testBtn = page.locator('.automation-row').nth(1).locator('button', { hasText: '发起测试' })
+  check('已配置测试时按钮可用', !(await testBtn.isDisabled()))
+  await testBtn.click()
+  await page.waitForTimeout(400)
+  check('测试请求发出', saved.testRuns.at(-1)?.projectId === 2 && saved.testRuns.at(-1)?.number === 13)
+  check('测试输出展示', (await page.locator('.automation-test-output').textContent()).includes('[测试通过]'))
+  check('状态更新为通过', (await page.locator('.automation-row').nth(1).textContent()).includes('✓ 通过'))
 
   // 手动重新评审
   await page.locator('.automation-row').first().locator('button', { hasText: '重新评审' }).click()

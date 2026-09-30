@@ -73,6 +73,92 @@ const settingsTab = ref<'general' | 'automation' | 'ai' | 'projects' | 'about'>(
 const aiTesting = ref(false)
 const aiTestMessage = ref('')
 const evaluatingPr = ref(false)
+const testConfigs = ref<Array<{ project_id: number; server_mode: string; host: string; username: string; workdir_template: string; commands: string; ai_decides: number; ai_prompt: string; timeout_sec: number; projectName: string }>>([])
+const testModal = ref(false)
+const testForm = ref({ projectId: 0, projectName: '', serverMode: 'ssh', host: '', username: '', workdirTemplate: '~/TEST/{project}_{pr}', commandOptions: [{ label: '全量', command: 'vendor/bin/phpunit tests' }], aiDecides: false, aiPrompt: '', timeoutSec: 600 })
+const testFormError = ref('')
+const savingTest = ref(false)
+const runningTest = ref(false)
+const testOutput = ref('')
+const testOutputEl = ref<HTMLElement | null>(null)
+
+function testConfigOf(projectId: number) {
+  return testConfigs.value.find((row) => row.project_id === projectId)
+}
+
+async function loadTestConfigs() {
+  try {
+    const rows = await window.releaseConsole.listTestConfigs()
+    if (Array.isArray(rows)) testConfigs.value = rows
+  } catch { }
+}
+
+function openTestConfig(group: DeployGroup) {
+  const existing = testConfigOf(group.project.id)
+  let options = [{ label: '全量', command: 'vendor/bin/phpunit tests' }]
+  if (existing) {
+    try { const parsed = JSON.parse(existing.commands); if (Array.isArray(parsed) && parsed.length) options = parsed } catch { }
+  }
+  testForm.value = {
+    projectId: group.project.id,
+    projectName: group.project.name,
+    serverMode: existing?.server_mode ?? 'ssh',
+    host: existing?.host ?? '',
+    username: existing?.username ?? '',
+    workdirTemplate: existing?.workdir_template ?? '~/TEST/{project}_{pr}',
+    commandOptions: options,
+    aiDecides: !!existing?.ai_decides,
+    aiPrompt: existing?.ai_prompt ?? '',
+    timeoutSec: existing?.timeout_sec ?? 600,
+  }
+  testFormError.value = ''
+  testModal.value = true
+}
+
+function addCommandOption() { testForm.value.commandOptions.push({ label: '', command: '' }) }
+function removeCommandOption(index: number) { if (testForm.value.commandOptions.length > 1) testForm.value.commandOptions.splice(index, 1) }
+
+async function saveTestConfig() {
+  const valid = testForm.value.commandOptions.every((option) => option.label.trim() && option.command.trim())
+  if (!valid) { testFormError.value = '每个命令选项都需要名称和命令'; return }
+  savingTest.value = true
+  try {
+    await window.releaseConsole.saveTestConfig({
+      projectId: testForm.value.projectId,
+      serverMode: testForm.value.serverMode,
+      host: testForm.value.host.trim(),
+      username: testForm.value.username.trim(),
+      workdirTemplate: testForm.value.workdirTemplate.trim(),
+      commands: JSON.stringify(testForm.value.commandOptions.map((option) => ({ label: option.label.trim(), command: option.command.trim() }))),
+      aiDecides: testForm.value.aiDecides,
+      aiPrompt: testForm.value.aiPrompt,
+      timeoutSec: Number(testForm.value.timeoutSec) || 600,
+    })
+    testModal.value = false
+    mergeMessage.value = '测试配置已保存'
+    await loadTestConfigs()
+  } catch (error) { testFormError.value = error instanceof Error ? error.message : '保存失败' } finally { savingTest.value = false }
+}
+
+async function runSelectedTest() {
+  const target = selectedPull.value
+  if (!target || runningTest.value) return
+  runningTest.value = true
+  testOutput.value = ''
+  target.pull.state = 'testing'
+  try {
+    testOutput.value = await window.releaseConsole.runPrTest({ projectId: target.project.id, number: Number(target.pull.number) }, (text) => {
+      testOutput.value += text
+      nextTick(() => testOutputEl.value?.scrollTo({ top: testOutputEl.value.scrollHeight }))
+    })
+    const success = testOutput.value.includes('[测试通过]')
+    target.pull.state = success ? 'test_passed' : 'test_failed'
+    mergeMessage.value = success ? '测试通过' : '测试失败'
+  } catch (error) {
+    target.pull.state = 'needs_test'
+    mergeMessage.value = error instanceof Error ? error.message : '测试发起失败'
+  } finally { runningTest.value = false }
+}
 
 async function reevaluateSelected() {
   const target = selectedPull.value
@@ -552,6 +638,7 @@ async function loadDeploymentRows() {
   try {
     deploymentRows.value = await window.releaseConsole.listDeploymentConfigs()
     try { deploymentServers.value = await window.releaseConsole.listDeploymentServers() } catch { }
+    loadTestConfigs()
   } finally {
     loadingDeployments.value = false
   }
@@ -707,6 +794,7 @@ async function loadPulls() {
     for (const project of projects.value) {
       project.openPrs = pulls.value.filter((item) => item.project.id === project.id && !isEndedPull(item)).length
     }
+    loadTestConfigs()
     try {
       syncStatusRows.value = await window.releaseConsole.syncStatus()
       pullLoadErrors.value = syncStatusRows.value.filter((row) => row.lastError).map((row) => `${row.name}：${row.lastError}`)
@@ -758,6 +846,7 @@ async function openPull(item: PullItem, seq: number) {
   files.value = []
   commits.value = []
   sidebarTab.value = 'files'
+  testOutput.value = ''
   expandedFiles.value = {}
   expandedDirs.value = {}
   fullFileViews.value = {}
@@ -1153,12 +1242,14 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
               </div>
               <div class="automation-row">
                 <span class="automation-label">测试</span>
-                <span v-if="selectedPull.pull.state === 'testing'" class="st-running-text">运行中…</span>
+                <span v-if="runningTest || selectedPull.pull.state === 'testing'" class="st-running-text">运行中…</span>
                 <span v-else-if="selectedPull.pull.state === 'test_passed'" class="stat-added">✓ 通过</span>
                 <span v-else-if="selectedPull.pull.state === 'test_failed'" class="stat-removed">✗ 失败</span>
-                <span v-else class="automation-note">未执行</span>
-                <button class="automation-action" disabled title="测试执行管线将在阶段 3 提供">发起测试</button>
+                <span v-else-if="testConfigOf(selectedPull.project.id)" class="automation-note">未执行</span>
+                <span v-else class="automation-note">未配置测试(部署页配置)</span>
+                <button class="automation-action" :disabled="runningTest || selectedEnded || selectedPull.pull.state === 'testing' || !testConfigOf(selectedPull.project.id)" @click="runSelectedTest">发起测试</button>
               </div>
+              <div v-if="testOutput" class="test-output-row"><pre ref="testOutputEl" class="automation-test-output">{{ testOutput }}</pre></div>
               <div class="automation-row">
                 <span class="automation-label">人工标记</span>
                 <button class="automation-action" :class="{ passed: reviewPassed }" :disabled="!selectedPull || selectedEnded || reviewPassed" @click="approveSelectedPull">{{ reviewPassed ? '✓ 审查已通过' : '标记审查通过' }}</button>
@@ -1183,6 +1274,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
                 <div class="row-actions">
                   <button class="primary" :disabled="!group.targets.some(configComplete) || deployLog.running" @click="runGroupDeployment(group)">{{ deployLog.running && deployLog.projectId === group.project.id ? '部署中…' : '全部执行' }}</button>
                   <button @click="openAddTarget(group)">添加目标</button>
+                  <button :class="{ primary: !!testConfigOf(group.project.id) }" @click="openTestConfig(group)">{{ testConfigOf(group.project.id) ? '测试配置' : '配置测试' }}</button>
                 </div>
               </div>
               <div v-if="group.targets.length" class="deploy-target-rows">
@@ -1304,6 +1396,28 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
     </div>
     <div v-if="sqlPopVisible && activePage === 'pulls'" class="sql-pop" title="点击定位第一个 SQL 文件" :style="sqlPopStyle" @click="locateFirstSql()"><span class="sql-pop-text">有 SQL 变动：{{ sqlFiles.map((file) => file.filename.split('/').pop()).join('、') }}</span></div>
     <div v-if="toastMessage" class="toast">{{ toastMessage }}</div>
+    <div v-if="testModal" class="modal-backdrop" @click.self="testModal = false">
+      <form class="modal test-config-modal" @submit.prevent="saveTestConfig"><h2>测试配置 · {{ testForm.projectName }}</h2><div v-if="testFormError" class="error-message">{{ testFormError }}</div>
+        <label>服务器模式<DropdownSelect v-model="testForm.serverMode" :options="[{ value: 'ssh', label: 'SSH 远程' }, { value: 'local', label: '本地' }]" /></label>
+        <template v-if="testForm.serverMode === 'ssh'">
+          <label>服务器地址<span class="combo"><input v-model="testForm.host" placeholder="example.com" @focus="showHostSuggestions = true" @blur="showHostSuggestions = false" /><span v-if="showHostSuggestions && hostSuggestions.length" class="combo-menu"><button type="button" v-for="host in hostSuggestions" :key="host" @mousedown.prevent="testForm.host = host; testForm.username = deploymentServers.find((server) => server.host === host)?.username || testForm.username; showHostSuggestions = false">{{ host }}</button></span></span></label>
+          <label>SSH 用户<input v-model="testForm.username" placeholder="deploy" /></label>
+        </template>
+        <label>测试项目位置(支持 {project} {pr} 变量)<input v-model="testForm.workdirTemplate" placeholder="~/TEST/{project}_{pr}" /></label>
+        <div class="command-options">
+          <div class="command-options-head"><span>测试命令选项(第一条为默认)</span><button type="button" @click="addCommandOption">+ 添加</button></div>
+          <div v-for="(option, index) in testForm.commandOptions" :key="index" class="command-option-row">
+            <input v-model="option.label" placeholder="名称,如 全量" />
+            <input v-model="option.command" placeholder="vendor/bin/phpunit tests" />
+            <button type="button" class="danger" :disabled="testForm.commandOptions.length <= 1" @click="removeCommandOption(index)">删</button>
+          </div>
+        </div>
+        <label class="checkbox-label"><input v-model="testForm.aiDecides" type="checkbox" />由 AI 根据变更从选项中选择</label>
+        <label v-if="testForm.aiDecides">AI 提示词(留空用默认)<textarea v-model="testForm.aiPrompt" rows="3"></textarea></label>
+        <label>超时(秒)<input v-model="testForm.timeoutSec" type="number" min="30" step="30" /></label>
+        <div class="modal-actions"><button type="button" @click="testModal = false">取消</button><button class="primary" type="submit" :disabled="savingTest">{{ savingTest ? '保存中…' : '保存' }}</button></div>
+      </form>
+    </div>
     <div v-if="oneClickRun" class="modal-backdrop">
       <div class="modal one-click-modal">
         <h2>{{ oneClickRun.direct || oneClickRun.withDeploy ? '一键部署' : `一键 ${settings.prBase}` }}</h2>
