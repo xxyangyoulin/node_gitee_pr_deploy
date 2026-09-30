@@ -19,6 +19,17 @@ function check(name, cond) {
     const req = route.request()
     const path = new URL(req.url()).pathname
     if (path === '/api/projects') return route.fulfill({ json: PROJECTS })
+    if (path === '/api/pulls') {
+      const project = PROJECTS.find((item) => item.id === 1)
+      return route.fulfill({ json: [{ number: 7, title: 'fake pr', body: '本次变更说明：\n1. 新增用户表字段\n2. 修复登录超时', head: { ref: 'dock' }, base: { ref: 'master' } }].filter((pull) => pull.state !== 'merged' && pull.state !== 'closed').map((pull) => ({
+        projectId: 1, projectName: project?.name ?? 'proj-one', repository: project?.repository ?? '', token: project?.token ?? '',
+        number: pull.number, title: pull.title, body: pull.body ?? '', author: pull.user?.name ?? pull.user?.login ?? '',
+        headRef: pull.head?.ref ?? pull.head?.label ?? '', baseRef: pull.base?.ref ?? pull.base?.label ?? '', headSha: pull.head?.sha ?? '',
+        state: 'new', statusNote: '', createdAt: pull.created_at ?? '', updatedAt: pull.created_at ?? '',
+      })) })
+    }
+    if (path === '/api/pulls/refresh') return route.fulfill({ json: { results: [] } })
+    if (path === '/api/sync/status') return route.fulfill({ json: [] })
     if (path === '/api/gitee/pulls') return route.fulfill({ json: [{ number: 7, title: 'fake pr', head: { ref: 'dock' }, base: { ref: 'master' } }] })
     if (path === '/api/gitee/pull-detail') return route.fulfill({ json: { number: 7, title: 'fake pr', body: '本次变更说明：\n1. 新增用户表字段\n2. 修复登录超时' } })
     if (path === '/api/gitee/pull-logs') return route.fulfill({ json: [] })

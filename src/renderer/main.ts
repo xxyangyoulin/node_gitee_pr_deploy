@@ -51,6 +51,15 @@ window.releaseConsole = {
     return request(`/api/deployment/logs${queryString ? `?${queryString}` : ''}`)
   },
   listPullRequests: (input) => request('/api/gitee/pulls', { method: 'POST', body: JSON.stringify(input) }),
+  cachedPulls: (query: { projectId?: number } = {}) => {
+    const params = new URLSearchParams()
+    if (query.projectId) params.set('projectId', String(query.projectId))
+    const queryString = params.toString()
+    return request(`/api/pulls${queryString ? `?${queryString}` : ''}`)
+  },
+  refreshPulls: (projectId?: number) => request('/api/pulls/refresh', { method: 'POST', body: JSON.stringify({ projectId }) }),
+  syncStatus: () => request('/api/sync/status'),
+  toggleSync: (projectId: number, enabled: boolean) => request('/api/sync/toggle', { method: 'POST', body: JSON.stringify({ projectId, enabled }) }),
   pullRequestDetail: (input) => request('/api/gitee/pull-detail', { method: 'POST', body: JSON.stringify(input) }),
   pullRequestLogs: (input) => request('/api/gitee/pull-logs', { method: 'POST', body: JSON.stringify(input) }),
   pullRequestFiles: (input) => request('/api/gitee/pull-files', { method: 'POST', body: JSON.stringify(input) }),

@@ -20,6 +20,17 @@ function check(name, cond) {
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/projects') return route.fulfill({ json: PROJECTS })
+    if (path === '/api/pulls') {
+      const project = PROJECTS.find((item) => item.id === 1)
+      return route.fulfill({ json: PRS.filter((pull) => pull.state !== 'merged' && pull.state !== 'closed').map((pull) => ({
+        projectId: 1, projectName: project?.name ?? 'proj-one', repository: project?.repository ?? '', token: project?.token ?? '',
+        number: pull.number, title: pull.title, body: pull.body ?? '', author: pull.user?.name ?? pull.user?.login ?? '',
+        headRef: pull.head?.ref ?? pull.head?.label ?? '', baseRef: pull.base?.ref ?? pull.base?.label ?? '', headSha: pull.head?.sha ?? '',
+        state: 'new', statusNote: '', createdAt: pull.created_at ?? '', updatedAt: pull.created_at ?? '',
+      })) })
+    }
+    if (path === '/api/pulls/refresh') return route.fulfill({ json: { results: [] } })
+    if (path === '/api/sync/status') return route.fulfill({ json: [] })
     if (path === '/api/gitee/pulls') return route.fulfill({ json: PRS })
     if (path === '/api/gitee/pull-logs') return route.fulfill({ json: [] })
     if (path === '/api/gitee/pull-files') return route.fulfill({ json: [] })

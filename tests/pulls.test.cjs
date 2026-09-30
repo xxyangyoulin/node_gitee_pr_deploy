@@ -4,7 +4,7 @@ const PROJECTS = [
   { id: 1, name: 'proj-one', repository: 'owner/proj-one', token: 't', openPrs: 1 },
   { id: 2, name: 'proj-two', repository: 'owner/proj-two', token: 't', openPrs: 3 },
 ]
-const PRS_ONE = [{ number: 7, title: 'one feature', user: { login: 'alice' }, head: { ref: 'dock' }, base: { ref: 'master' }, created_at: '2026-09-20T10:30:00+08:00' }]
+const PRS_ONE = [{ number: 7, title: 'one feature', user: { login: 'alice' }, head: { ref: 'dock' }, base: { ref: 'master' }, created_at: '2026-09-20T10:30:00+08:00', state: 'open' }]
 const PRS_TWO = [
   { number: 13, title: 'chore deps', user: { login: 'dave' }, head: { ref: 'chore-x' }, base: { ref: 'dock' }, created_at: '2026-09-28T09:00:00+08:00' },
   { number: 12, title: 'two fix', user: { login: 'carol' }, head: { ref: 'fix-y' }, base: { ref: 'master' }, created_at: '2026-09-27T23:59:00+08:00' },
@@ -33,9 +33,41 @@ function check(name, cond) {
     const path = new URL(req.url()).pathname
     if (path === '/api/projects') return route.fulfill({ json: PROJECTS })
     if (path === '/api/settings') return route.fulfill({ json: { prHead: 'dock', prBase: 'master', mergeMethod: 'merge' } })
+    if (path === '/api/pulls') {
+      const open = [...PRS_ONE, ...PRS_TWO].filter((pull) => !mergedNumbers.includes(pull.number) && pull.state !== 'merged')
+      return route.fulfill({ json: open.flatMap((pull) => {
+        const isOne = PRS_ONE.includes(pull)
+        return [{
+          projectId: isOne ? 1 : 2,
+          projectName: isOne ? 'proj-one' : 'proj-two',
+          repository: isOne ? 'owner/proj-one' : 'owner/proj-two',
+          token: 't',
+          number: pull.number,
+          title: pull.title,
+          body: '',
+          author: pull.user?.name || '',
+          headRef: pull.head?.ref || '',
+          baseRef: pull.base?.ref || '',
+          headSha: pull.head?.sha || '',
+          state: pull.state === 'open' ? 'new' : (pull.state || 'new'),
+          statusNote: '',
+          createdAt: pull.created_at,
+          updatedAt: pull.created_at,
+        }]
+      }) })
+    }
+    if (path === '/api/pulls/refresh') {
+      if (projTwoPullsFail) return route.fulfill({ json: { results: [{ projectId: 2, name: 'proj-two', error: 'mock token 失效' }] } })
+      return route.fulfill({ json: { results: [{ projectId: 1, name: 'proj-one', error: '' }, { projectId: 2, name: 'proj-two', error: '' }] } })
+    }
+    if (path === '/api/sync/status') {
+      return route.fulfill({ json: [
+        { projectId: 1, name: 'proj-one', lastSyncAt: '2026-09-29 10:00:00', lastError: projTwoPullsFail ? '' : '', enabled: 1 },
+        { projectId: 2, name: 'proj-two', lastSyncAt: '2026-09-29 10:00:00', lastError: projTwoPullsFail ? 'mock token 失效' : '', enabled: 1 },
+      ] })
+    }
     if (path === '/api/gitee/pulls') {
       const repository = req.postDataJSON().repository
-      if (projTwoPullsFail && repository === 'owner/proj-two') return route.fulfill({ status: 500, json: { message: 'mock token 失效' } })
       return route.fulfill({ json: repository === 'owner/proj-one' ? PRS_ONE : PRS_TWO.filter((pull) => !mergedNumbers.includes(pull.number)) })
     }
     if (path === '/api/gitee/approve-pull') { saved.approves.push(req.postDataJSON()); return route.fulfill({ json: {} }) }

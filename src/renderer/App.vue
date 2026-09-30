@@ -44,6 +44,23 @@ const token = ref('')
 const pulls = ref<PullItem[]>([])
 const loadingPulls = ref(false)
 const pullLoadErrors = ref<string[]>([])
+const syncStatusRows = ref<Array<{ projectId: number; name: string; lastSyncAt: string; lastError: string; enabled: number }>>([])
+
+const stateBadgeMap: Record<string, { label: string; cls: string }> = {
+  new: { label: '待评估', cls: 'st-new' },
+  ai_reviewing: { label: 'AI 评估中', cls: 'st-running' },
+  no_test_needed: { label: '无需测试', cls: 'st-pass' },
+  needs_test: { label: '待测试', cls: 'st-warn' },
+  testing: { label: '测试中', cls: 'st-running' },
+  test_passed: { label: '测试通过', cls: 'st-pass' },
+  test_failed: { label: '测试失败', cls: 'st-fail' },
+  merged: { label: '已合并', cls: 'st-merged' },
+  closed: { label: '已关闭', cls: 'st-closed' },
+}
+
+function stateBadge(state: string) {
+  return stateBadgeMap[state] ?? { label: state, cls: 'st-new' }
+}
 const pullFilter = ref<number | 'all'>('all')
 const filteredPulls = computed(() => pullFilter.value === 'all' ? pulls.value : pulls.value.filter((item) => item.project.id === pullFilter.value))
 const selectedPull = ref<PullItem | null>(null)
@@ -147,7 +164,7 @@ const isDockToMaster = computed(() => {
 
 const showOneClickDeploy = computed(() => !!oneClickTarget.value || isDockToMaster.value)
 
-const settings = ref({ prHead: 'dock', prBase: 'master', mergeMethod: 'merge' })
+const settings = ref({ prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0' })
 const meta = ref({ version: '', dataPath: '' })
 
 const showCreatePr = ref(false)
@@ -464,6 +481,12 @@ async function loadSettings() {
   applyPrDefaults()
 }
 
+async function toggleProjectSync(row: { projectId: number; enabled: number }) {
+  await window.releaseConsole.toggleSync(row.projectId, !row.enabled)
+  row.enabled = row.enabled ? 0 : 1
+  syncStatusRows.value = [...syncStatusRows.value]
+}
+
 async function saveAppSettings() {
   try { settings.value = await window.releaseConsole.saveSettings({ ...settings.value }) } catch (error) { mergeMessage.value = error instanceof Error ? error.message : '保存设置失败'; return }
   mergeMessage.value = '设置已保存'
@@ -611,23 +634,44 @@ async function loadPulls() {
   loadingPulls.value = true
   errorMessage.value = ''
   try {
-    const results = await Promise.all(projects.value.map(async (project) => {
-      try {
-        const list = await window.releaseConsole.listPullRequests({ repository: project.repository, token: project.token })
-        return { items: list.map((pull: any) => ({ project, pull })), error: '' }
-      } catch (error) {
-        return { items: [] as PullItem[], error: `${project.name}：${error instanceof Error ? error.message : '加载失败'}` }
-      }
-    }))
-    pulls.value = results.flatMap((result) => result.items).sort((a, b) => (Date.parse(String(b.pull.created_at ?? '')) || 0) - (Date.parse(String(a.pull.created_at ?? '')) || 0))
-    pullLoadErrors.value = results.map((result) => result.error).filter(Boolean)
+    const rows = await window.releaseConsole.cachedPulls()
+    pulls.value = rows
+      .filter((row) => row.state !== 'merged' && row.state !== 'closed')
+      .map((row) => ({
+        project: { id: row.projectId, name: row.projectName, repository: row.repository, token: row.token, openPrs: 0 },
+        pull: {
+          number: row.number,
+          title: row.title,
+          body: row.body,
+          user: { name: row.author },
+          head: { ref: row.headRef, sha: row.headSha },
+          base: { ref: row.baseRef },
+          created_at: row.createdAt,
+          updated_at: row.updatedAt,
+          state: row.state,
+          status_note: row.statusNote,
+        },
+      }))
+      .sort((a, b) => (Date.parse(String(b.pull.updated_at ?? b.pull.created_at ?? '')) || 0) - (Date.parse(String(a.pull.updated_at ?? a.pull.created_at ?? '')) || 0))
     for (const project of projects.value) {
       project.openPrs = pulls.value.filter((item) => item.project.id === project.id).length
     }
+    try {
+      syncStatusRows.value = await window.releaseConsole.syncStatus()
+      pullLoadErrors.value = syncStatusRows.value.filter((row) => row.lastError).map((row) => `${row.name}：${row.lastError}`)
+    } catch { }
     if (selectedPull.value && !pulls.value.some((item) => isSelected(item))) clearSelection()
   } finally {
     loadingPulls.value = false
   }
+}
+
+async function refreshPulls() {
+  loadingPulls.value = true
+  try {
+    const { results } = await window.releaseConsole.refreshPulls()
+    pullLoadErrors.value = results.filter((row) => row.error).map((row) => `${row.name}：${row.error}`)
+  } catch (error) { pullLoadErrors.value = [error instanceof Error ? error.message : '刷新失败'] } finally { await loadPulls() }
 }
 
 function clearSelection() {
@@ -675,8 +719,7 @@ async function openPull(item: PullItem, seq: number) {
   errorMessage.value = ''
   try {
     const stale = () => seq !== selectionSeq || selectedPull.value !== item
-    const detail = await window.releaseConsole.pullRequestDetail({ repository: project.repository, token: project.token, number: Number(pull.number) })
-    prDescription.value = String(detail?.body ?? '').trim()
+    prDescription.value = String(pull.body ?? '').trim() || prDescription.value
     const logs = await window.releaseConsole.pullRequestLogs({ repository: project.repository, token: project.token, number: Number(pull.number) })
     if (stale()) return
     const logText = (log: any) => `${log.content || ''} ${log.action_type || ''} ${log.after_change_value || ''}`.toLowerCase()
@@ -1041,14 +1084,14 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             <div><h1>PR</h1><p v-if="selectedPull" class="selected-pr-line">已选<span class="project-badge selected-project-badge" :title="selectedPull.project.repository">{{ selectedPull.project.name }}</span><strong class="selected-pr-ref">#{{ selectedPull.pull.number }} · {{ selectedPull.pull.title }}</strong></p><p v-else>汇总所有项目的开放 PR，点击左侧 PR 查看变更与操作。</p></div>
             <div class="heading-actions">
               <DropdownSelect v-model="pullFilter" class="filter-select" :options="[{ value: 'all', label: '全部项目' }, ...projects.map((project) => ({ value: project.id, label: project.name }))]" />
-              <button :class="{ passed: reviewPassed }" :disabled="!selectedPull || reviewPassed" @click="approveSelectedPull">{{ reviewPassed ? '审查已通过' : '审查通过' }}</button><button :class="{ passed: testPassed }" :disabled="!selectedPull || testPassed" @click="requestTestPassed">{{ testPassed ? '测试已通过' : '测试通过' }}</button><button class="merge-action" :class="{ ready: reviewPassed && testPassed, confirming: mergeConfirming }" :disabled="!selectedPull" @click="requestMerge">{{ mergeConfirming ? '再次点击确认合并' : reviewPassed && testPassed ? '合并 PR' : '一键合并' }}</button><button v-if="oneClickTarget" class="one-click primary" :class="{ confirming: oneClickAction === 'master' }" :disabled="!!oneClickRun?.running" @click="requestOneClick('master')">{{ oneClickAction === 'master' ? '再次点击确认' : `一键 ${settings.prBase}` }}</button><button v-if="showOneClickDeploy" class="one-click" :class="{ confirming: oneClickAction === 'deploy' }" :disabled="!!oneClickRun?.running" @click="requestOneClick('deploy')">{{ oneClickAction === 'deploy' ? '再次点击确认' : '一键部署' }}</button><button :disabled="!projects.length" @click="openCreatePr">创建 PR</button><button :disabled="loadingPulls" @click="loadPulls">{{ loadingPulls ? '加载中…' : '刷新' }}</button>
+              <button :class="{ passed: reviewPassed }" :disabled="!selectedPull || reviewPassed" @click="approveSelectedPull">{{ reviewPassed ? '审查已通过' : '审查通过' }}</button><button :class="{ passed: testPassed }" :disabled="!selectedPull || testPassed" @click="requestTestPassed">{{ testPassed ? '测试已通过' : '测试通过' }}</button><button class="merge-action" :class="{ ready: reviewPassed && testPassed, confirming: mergeConfirming }" :disabled="!selectedPull" @click="requestMerge">{{ mergeConfirming ? '再次点击确认合并' : reviewPassed && testPassed ? '合并 PR' : '一键合并' }}</button><button v-if="oneClickTarget" class="one-click primary" :class="{ confirming: oneClickAction === 'master' }" :disabled="!!oneClickRun?.running" @click="requestOneClick('master')">{{ oneClickAction === 'master' ? '再次点击确认' : `一键 ${settings.prBase}` }}</button><button v-if="showOneClickDeploy" class="one-click" :class="{ confirming: oneClickAction === 'deploy' }" :disabled="!!oneClickRun?.running" @click="requestOneClick('deploy')">{{ oneClickAction === 'deploy' ? '再次点击确认' : '一键部署' }}</button><button :disabled="!projects.length" @click="openCreatePr">创建 PR</button><button :disabled="loadingPulls" @click="refreshPulls">{{ loadingPulls ? '刷新中…' : '刷新' }}</button>
             </div>
           </div>
           <div v-if="!projects.length" class="empty-state">还没有项目，请先在项目页添加。</div>
           <template v-else>
             <div v-if="pullLoadErrors.length" class="load-warning">部分项目 PR 加载失败：{{ pullLoadErrors.join('；') }}</div>
             <div class="pr-workspace">
-            <aside class="pr-list"><div v-if="!filteredPulls.length && !loadingPulls" class="list-empty">没有开放 PR</div><button v-for="item in filteredPulls" :key="`${item.project.id}-${item.pull.number}`" :class="['pr-item', { selected: isSelected(item) }]" @click="selectPull(item)"><span class="project-badge" :title="item.project.repository">{{ item.project.name }}</span><strong>#{{ item.pull.number }} {{ item.pull.title }}</strong><span>{{ authorOf(item.pull) }}</span><small class="pr-branches"><span class="branch-chip branch-head" :class="{ 'branch-main': isMainBranch(item.pull.head?.ref || item.pull.head?.label) }" :title="item.pull.head?.label || item.pull.head?.ref">{{ item.pull.head?.ref || item.pull.head?.label || '?' }}</span><span class="branch-arrow">→</span><span class="branch-chip branch-base" :class="{ 'branch-main': isMainBranch(item.pull.base?.ref || item.pull.base?.label) }" :title="item.pull.base?.label || item.pull.base?.ref">{{ item.pull.base?.ref || item.pull.base?.label || '?' }}</span></small><small class="pr-time">{{ formatTime(item.pull.created_at) }}</small></button></aside>
+            <aside class="pr-list"><div v-if="!filteredPulls.length && !loadingPulls" class="list-empty">没有开放 PR</div><button v-for="item in filteredPulls" :key="`${item.project.id}-${item.pull.number}`" :class="['pr-item', { selected: isSelected(item) }]" @click="selectPull(item)"><span class="project-badge" :title="item.project.repository">{{ item.project.name }}</span><strong>#{{ item.pull.number }} {{ item.pull.title }}</strong><span v-if="item.pull.state && item.pull.state !== 'open'" :class="['state-badge', stateBadge(item.pull.state).cls]" :title="item.pull.status_note || ''">{{ stateBadge(item.pull.state).label }}</span><span>{{ authorOf(item.pull) }}</span><small class="pr-branches"><span class="branch-chip branch-head" :class="{ 'branch-main': isMainBranch(item.pull.head?.ref || item.pull.head?.label) }" :title="item.pull.head?.label || item.pull.head?.ref">{{ item.pull.head?.ref || item.pull.head?.label || '?' }}</span><span class="branch-arrow">→</span><span class="branch-chip branch-base" :class="{ 'branch-main': isMainBranch(item.pull.base?.ref || item.pull.base?.label) }" :title="item.pull.base?.label || item.pull.base?.ref">{{ item.pull.base?.ref || item.pull.base?.label || '?' }}</span></small><small class="pr-time">{{ formatTime(item.pull.created_at) }}</small></button></aside>
             <section class="code-panel" :class="{ 'has-list': files.length > 0 && !loadingFiles }" :style="files.length > 0 && !loadingFiles ? { gridTemplateColumns: `${fileListWidth}px 5px minmax(0, 1fr)` } : undefined"><aside v-if="files.length > 0 && !loadingFiles" class="file-list"><div class="sidebar-tabs"><button :class="{ active: sidebarTab === 'files' }" class="files-tab" @click="sidebarTab = 'files'">文件<span v-if="sqlFiles.length" class="sql-dot"></span></button><button :class="{ active: sidebarTab === 'commits' }" @click="sidebarTab = 'commits'">提交记录</button></div><div class="file-list-scroll"><template v-if="sidebarTab === 'files'"><button v-for="row in fileTreeRows" :key="row.type + ':' + row.key" :class="['file-item', { dir: row.type === 'dir', active: row.type === 'file' && row.index === activeFileIndex, sql: row.type === 'file' && isSqlFile(row.key) }]" :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }" :title="row.key" @click="row.type === 'dir' ? toggleDir(row.key) : jumpToFile(row.index)"><span v-if="row.type === 'dir'" class="file-toggle">{{ isDirExpanded(row.key) || fileQuery.trim() ? '▾' : '▸' }}</span><span class="file-name">{{ row.name }}</span><span v-if="row.type === 'file' && isSqlFile(row.key)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ row.added }}</span><span class="stat-removed">-{{ row.removed }}</span></span></button></template><template v-else><button v-for="commit in commits" :key="commit.sha" :class="['commit-item', { active: viewingCommit?.sha === commit.sha }]" :title="firstLine(commit.commit?.message)" @click="selectCommit(commit)"><span class="commit-message">{{ firstLine(commit.commit?.message) }}</span><span class="commit-meta"><span>{{ commit.commit?.author?.name || '未知提交人' }}</span><span class="commit-sha" title="点击复制 SHA" @click.stop="copyCommitSha(commit)">{{ shortSha(commit.sha) }}</span><span class="history-time">{{ formatTime(commit.commit?.author?.date) }}</span></span></button><div v-if="!commits.length" class="settings-empty">暂无提交记录</div></template></div></aside><div v-if="files.length > 0 && !loadingFiles" class="resize-handle" @mousedown="startResize"></div><div class="files-main"><div v-if="loadingFiles" class="empty-state loading-state"><LoadingAnim /><p>加载文件中…</p></div><div v-else-if="commitLoading" class="empty-state loading-state"><LoadingAnim /><p>加载提交内容…</p></div><div v-else-if="!selectedPull" class="empty-state">选择一个 PR 查看变更与操作</div><div v-else-if="!files.length" class="empty-state">该 PR 没有可展示的文件</div><template v-else><div v-if="prDescription" class="pr-description" :class="{ open: prDescriptionOpen }"><button class="pr-description-toggle" type="button" @click="prDescriptionOpen = !prDescriptionOpen">{{ prDescriptionOpen ? '▾' : '▸' }} PR 描述</button><pre v-if="prDescriptionOpen" class="pr-description-body">{{ prDescription }}</pre></div><div class="files-toolbar"><span v-if="viewingCommit" class="commit-viewing">正在查看提交 <span class="commit-sha">{{ shortSha(viewingCommit.sha) }}</span> · {{ files.length }} 个文件<button type="button" class="commit-back" @click="exitCommitView">← 返回 PR 文件</button></span><span v-else>{{ fileQuery.trim() ? `${matchedCount}/${files.length} 个文件` : `${files.length} 个文件` }}</span><span class="toolbar-stats"><span class="stat-added">+{{ totalStats.added }}</span><span class="stat-removed">-{{ totalStats.removed }}</span></span><span class="toolbar-spacer"></span><input v-model="fileQuery" class="file-search" placeholder="搜索文件名" /><button @click="setAllFilesExpanded(true)">全部展开</button><button @click="setAllFilesExpanded(false)">全部收起</button></div><div ref="filesScrollEl" class="files-scroll" @scroll="onFilesScroll"><div v-for="(file, index) in files" :id="`pr-file-card-${index}`" :key="file.filename" v-show="fileMatches(file.filename)" :data-index="index" class="file-card"><button class="file-card-header" :class="{ 'sql-card': isSqlFile(file.filename) }" @click="toggleFile(file.filename)"><span class="file-toggle">{{ isFileExpanded(file.filename) ? '▾' : '▸' }}</span><span class="file-name" :title="file.filename">{{ file.filename }}</span><span v-if="isSqlFile(file.filename)" class="sql-tag">SQL</span><span class="file-stat"><span class="stat-added">+{{ fileStats[index]?.added ?? 0 }}</span><span class="stat-removed">-{{ fileStats[index]?.removed ?? 0 }}</span></span><span class="copy-btn" title="复制 diff" @click.stop="copyPatch(file)">复制</span><span class="copy-btn full-toggle" :class="{ active: isFullFileView(file.filename) }" title="查看完整文件 / 切回 diff" @click.stop="toggleFullFile(file)">{{ isFullFileView(file.filename) ? '返回 diff' : '完整文件' }}</span></button><pre v-if="isFileExpanded(file.filename) && isFullFileView(file.filename)" class="code-view file-diff full-file">{{ fullFileLoading[file.filename] ? '加载中…' : fullFileContents[file.filename] || '无法加载文件内容' }}</pre><pre v-else-if="isFileExpanded(file.filename)" class="code-view file-diff"><code><span v-for="(line, lineIndex) in fileDiffs[index]" :key="lineIndex" :class="['code-line', `line-${line.kind}`]"><span class="line-prefix">{{ line.prefix }}</span><span v-html="line.html"></span></span></code></pre></div></div></template></div></section>
           </div>
           </template>
@@ -1104,10 +1147,18 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
         <section v-else class="page">
           <h1>设置</h1>
           <form class="settings-section" @submit.prevent="saveAppSettings">
-            <h2>PR 与合并</h2>
+            <h2>PR 与合并 / 自动化</h2>
             <label>PR 来源分支(head)<input v-model="settings.prHead" placeholder="dock" /></label>
             <label>PR 目标分支(base)<input v-model="settings.prBase" placeholder="master" /></label>
             <label>合并方式<DropdownSelect v-model="settings.mergeMethod" :options="[{ value: 'merge', label: 'merge · 保留完整历史' }, { value: 'rebase', label: 'rebase · 变基合并' }, { value: 'squash', label: 'squash · 压缩为单个提交' }]" /></label>
+            <label>轮询间隔(秒,最小 60)<input v-model="settings.pollIntervalSec" type="number" min="60" step="10" /></label>
+            <label>全局自动化(阶段 2 生效)<DropdownSelect v-model="settings.automationEnabled" :options="[{ value: '0', label: '关闭' }, { value: '1', label: '开启' }]" /></label>
+            <div class="sync-project-list">
+              <div v-for="row in syncStatusRows" :key="row.projectId" class="project-row">
+                <div class="project-row-info"><strong>{{ row.name }}</strong><span>{{ row.lastSyncAt ? `上次同步 ${row.lastSyncAt}` : '未同步' }}<template v-if="row.lastError"> · <em class="sync-error">{{ row.lastError }}</em></template></span></div>
+                <div class="row-actions"><button :class="{ primary: !row.enabled }" @click="toggleProjectSync(row)">{{ row.enabled ? '暂停轮询' : '恢复轮询' }}</button></div>
+              </div>
+            </div>
             <button class="primary" type="submit">保存设置</button>
           </form>
           <div class="settings-section">

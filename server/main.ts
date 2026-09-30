@@ -3,6 +3,8 @@ import { readFileSync, existsSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
+import { gitee } from './gitee.js'
+import { startPoller, pollAll } from './poller.js'
 
 const port = Number(process.env.PORT) || 18763
 const root = process.cwd()
@@ -15,6 +17,8 @@ database.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value 
 database.exec('CREATE TABLE IF NOT EXISTS deployment_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, project_name TEXT NOT NULL DEFAULT "", target_name TEXT NOT NULL DEFAULT "", host TEXT NOT NULL DEFAULT "", output TEXT NOT NULL DEFAULT "", success INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
 try { database.exec('ALTER TABLE deployment_logs ADD COLUMN target_name TEXT NOT NULL DEFAULT ""') } catch { }
 database.exec('CREATE TABLE IF NOT EXISTS deploy_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, name TEXT NOT NULL DEFAULT "", host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", remote_path TEXT NOT NULL DEFAULT "", command TEXT NOT NULL DEFAULT "", position INTEGER NOT NULL DEFAULT 0)')
+database.exec('CREATE TABLE IF NOT EXISTS pr_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL DEFAULT "", body TEXT NOT NULL DEFAULT "", author TEXT NOT NULL DEFAULT "", head_ref TEXT NOT NULL DEFAULT "", base_ref TEXT NOT NULL DEFAULT "", head_sha TEXT NOT NULL DEFAULT "", state TEXT NOT NULL DEFAULT "new", status_note TEXT NOT NULL DEFAULT "", raw TEXT NOT NULL DEFAULT "", gitee_created_at TEXT NOT NULL DEFAULT "", gitee_updated_at TEXT NOT NULL DEFAULT "", first_seen_at TEXT NOT NULL DEFAULT "", last_seen_at TEXT NOT NULL DEFAULT "", synced_at TEXT NOT NULL DEFAULT "", UNIQUE(project_id, number))')
+database.exec('CREATE TABLE IF NOT EXISTS sync_state (project_id INTEGER PRIMARY KEY, last_sync_at TEXT NOT NULL DEFAULT "", last_error TEXT NOT NULL DEFAULT "", enabled INTEGER NOT NULL DEFAULT 1)')
 {
   const targetCount = (database.prepare('SELECT COUNT(*) AS c FROM deploy_targets').get() as any).c
   if (!targetCount) {
@@ -29,16 +33,12 @@ database.exec('CREATE TABLE IF NOT EXISTS deploy_targets (id INTEGER PRIMARY KEY
   }
 }
 
-const defaultSettings = { prHead: 'dock', prBase: 'master', mergeMethod: 'merge' }
+const defaultSettings: Record<string, string> = { prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0' }
 
 function readSettings() {
   const rows = database.prepare('SELECT key,value FROM settings').all() as Array<{ key: string; value: string }>
   const stored = Object.fromEntries(rows.map((row) => [row.key, row.value]))
-  return {
-    prHead: stored.prHead || defaultSettings.prHead,
-    prBase: stored.prBase || defaultSettings.prBase,
-    mergeMethod: stored.mergeMethod || defaultSettings.mergeMethod,
-  }
+  return Object.fromEntries(Object.keys(defaultSettings).map((key) => [key, stored[key] || defaultSettings[key]]))
 }
 
 function saveSettings(input: Record<string, unknown>) {
@@ -48,17 +48,6 @@ function saveSettings(input: Record<string, unknown>) {
 }
 
 type Input = { repository: string; token: string }
-
-async function gitee(input: Input, endpoint: string, init?: RequestInit) {
-  const url = new URL(`https://gitee.com/api/v5/repos/${input.repository}/${endpoint}`)
-  url.searchParams.set('access_token', input.token)
-  const response = await fetch(url, init)
-  const text = await response.text()
-  let body: any
-  try { body = JSON.parse(text) } catch { body = { message: text.slice(0, 300) } }
-  if (!response.ok) throw new Error(`Gitee ${response.status}: ${body.message ?? JSON.stringify(body)}`)
-  return body
-}
 
 function json(response: import('node:http').ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' })
@@ -108,6 +97,42 @@ async function api(request: import('node:http').IncomingMessage, response: impor
     return json(response, 200, rows)
   }
   if (path === '/api/deployment/servers' && request.method === 'GET') return json(response, 200, database.prepare("SELECT host,username FROM deploy_targets WHERE host != '' GROUP BY host").all())
+  if (path === '/api/pulls' && request.method === 'GET') {
+    const params = new URL(request.url || '', 'http://localhost').searchParams
+    const projectId = Number(params.get('projectId')) || 0
+    const rows = projectId
+      ? database.prepare('SELECT c.*, p.name AS projectName, p.repository, p.token FROM pr_cache c JOIN projects p ON p.id=c.project_id WHERE c.project_id=? ORDER BY c.gitee_updated_at DESC').all(projectId)
+      : database.prepare('SELECT c.*, p.name AS projectName, p.repository, p.token FROM pr_cache c JOIN projects p ON p.id=c.project_id ORDER BY c.gitee_updated_at DESC').all()
+    return json(response, 200, rows.map((row: any) => ({
+      projectId: row.project_id,
+      projectName: row.project_name,
+      repository: row.repository,
+      token: row.token,
+      number: row.number,
+      title: row.title,
+      body: row.body,
+      author: row.author,
+      headRef: row.head_ref,
+      baseRef: row.base_ref,
+      headSha: row.head_sha,
+      state: row.state,
+      statusNote: row.status_note,
+      createdAt: row.gitee_created_at,
+      updatedAt: row.gitee_updated_at,
+    })))
+  }
+  if (path === '/api/pulls/refresh' && request.method === 'POST') {
+    const results = await pollAll(database, Number(input.projectId) || 0)
+    return json(response, 200, { results })
+  }
+  if (path === '/api/sync/status' && request.method === 'GET') {
+    const rows = database.prepare('SELECT s.project_id AS projectId, p.name, s.last_sync_at AS lastSyncAt, s.last_error AS lastError, s.enabled FROM sync_state s JOIN projects p ON p.id=s.project_id ORDER BY s.project_id DESC').all()
+    return json(response, 200, rows)
+  }
+  if (path === '/api/sync/toggle' && request.method === 'POST') {
+    database.prepare('INSERT INTO sync_state(project_id,enabled) VALUES(?,?) ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled').run(input.projectId, input.enabled ? 1 : 0)
+    return json(response, 200, {})
+  }
   if (path === '/api/settings' && request.method === 'GET') return json(response, 200, readSettings())
   if (path === '/api/settings' && request.method === 'POST') return json(response, 200, saveSettings(input))
   if (path === '/api/meta' && request.method === 'GET') return json(response, 200, { version, dataPath: databasePath })
@@ -165,4 +190,8 @@ createServer(async (request, response) => {
     const type = extname(target) === '.js' ? 'text/javascript' : extname(target) === '.css' ? 'text/css' : 'text/html'
     response.writeHead(200, { 'content-type': `${type}; charset=utf-8` }); response.end(content)
   } catch (error) { json(response, 500, { message: error instanceof Error ? error.message : '服务器错误' }) }
-}).listen(port, '127.0.0.1', () => console.log(`Gitee Release Console: http://127.0.0.1:${port}`))
+}).listen(port, '127.0.0.1', () => {
+  console.log(`Gitee Release Console: http://127.0.0.1:${port}`)
+  pollerHandle = startPoller(database)
+})
+let pollerHandle: ReturnType<typeof startPoller> | undefined

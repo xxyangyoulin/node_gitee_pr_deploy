@@ -2,6 +2,7 @@ const { spawn, spawnSync } = require('node:child_process')
 const http = require('node:http')
 const path = require('node:path')
 
+const unitTests = ['poller.test.cjs']
 const tests = ['nav.test.cjs', 'pulls.test.cjs', 'pulls-overflow.test.cjs', 'deploy.test.cjs', 'settings.test.cjs', 'pr-files.test.cjs', 'branches.test.cjs']
 const PORT = process.env.TEST_PORT || 5299
 const root = path.join(__dirname, '..')
@@ -25,6 +26,11 @@ function waitForServer(url, timeoutMs = 30000) {
   try {
     await waitForServer(`http://localhost:${PORT}/`)
     const failed = []
+    for (const test of unitTests) {
+      console.log(`\n=== ${test} ===`)
+      const result = spawnSync('node', [path.join(__dirname, test)], { stdio: 'inherit', cwd: path.join(__dirname, '..') })
+      if (result.status !== 0) failed.push(test)
+    }
     for (const test of tests) {
       console.log(`\n=== ${test} ===`)
       const result = spawnSync('node', [path.join(__dirname, test)], { stdio: 'inherit', env: { ...process.env, BASE_URL: `http://localhost:${PORT}` } })

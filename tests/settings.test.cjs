@@ -26,6 +26,17 @@ function check(name, cond) {
     if (path === '/api/settings' && req.method() === 'POST') { saved.settings.push(req.postDataJSON()); return route.fulfill({ json: req.postDataJSON() }) }
     if (path === '/api/projects/update') { const input = req.postDataJSON(); saved.updates.push(input); return route.fulfill({ json: { id: input.id, name: input.name, repository: input.repository, token: input.token || 'kept', openPrs: 0 } }) }
     if (path === '/api/meta') return route.fulfill({ json: { version: '9.9.9', dataPath: '/tmp/fake/release-console.sqlite' } })
+    if (path === '/api/pulls') {
+      const project = PROJECTS.find((item) => item.id === 1)
+      return route.fulfill({ json: [{ number: 7, title: 'fake pr', user: { login: 'alice' }, head: { ref: 'feat' }, base: { ref: 'stable' }, created_at: '2026-09-20T10:30:00+08:00' }].filter((pull) => pull.state !== 'merged' && pull.state !== 'closed').map((pull) => ({
+        projectId: 1, projectName: project?.name ?? 'proj-one', repository: project?.repository ?? '', token: project?.token ?? '',
+        number: pull.number, title: pull.title, body: pull.body ?? '', author: pull.user?.name ?? pull.user?.login ?? '',
+        headRef: pull.head?.ref ?? pull.head?.label ?? '', baseRef: pull.base?.ref ?? pull.base?.label ?? '', headSha: pull.head?.sha ?? '',
+        state: 'new', statusNote: '', createdAt: pull.created_at ?? '', updatedAt: pull.created_at ?? '',
+      })) })
+    }
+    if (path === '/api/pulls/refresh') return route.fulfill({ json: { results: [] } })
+    if (path === '/api/sync/status') return route.fulfill({ json: [] })
     if (path === '/api/gitee/pulls') return route.fulfill({ json: [{ number: 7, title: 'fake pr', user: { login: 'alice' }, head: { ref: 'feat' }, base: { ref: 'stable' }, created_at: '2026-09-20T10:30:00+08:00' }] })
     if (path === '/api/gitee/approve-pull') { saved.approves = saved.approves || []; saved.approves.push(req.postDataJSON()); return route.fulfill({ json: {} }) }
     if (path === '/api/gitee/merge-pull') { saved.merges.push(req.postDataJSON()); return route.fulfill({ json: {} }) }
@@ -42,12 +53,12 @@ function check(name, cond) {
   check('设置页三个区块', (await page.locator('.settings-section').count()) === 3)
   check('head 预填 feat', (await page.locator('.settings-section input').first().inputValue()) === 'feat')
   check('base 预填 stable', (await page.locator('.settings-section input').nth(1).inputValue()) === 'stable')
-  check('合并方式预填 rebase', (await page.locator('.settings-section .dropdown-toggle').textContent()).includes('rebase'))
+  check('合并方式预填 rebase', (await page.locator('.settings-section .dropdown-toggle').first().textContent()).includes('rebase'))
   check('项目管理列出 2 个项目', (await page.locator('.project-row').count()) === 2)
   check('版本信息展示', (await page.locator('.meta-row code').first().textContent()) === '9.9.9')
   await page.screenshot({ path: shot('settings.png'), fullPage: true })
 
-  await page.locator('.settings-section .dropdown-toggle').click()
+  await page.locator('.settings-section .dropdown-toggle').first().click()
   await page.locator('.dropdown-menu button', { hasText: 'squash' }).click()
   await page.locator('.settings-section button[type=submit]').click()
   await page.waitForTimeout(200)
