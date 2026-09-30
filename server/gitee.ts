@@ -33,6 +33,5 @@ export async function gitee(input: Input, endpoint: string, init?: RequestInit) 
     logger?.({ repository: input.repository, endpoint, method, ok: false, status: response.status, errorMessage, durationMs })
     throw new Error(errorMessage)
   }
-  logger?.({ repository: input.repository, endpoint, method, ok: true, status: response.status, errorMessage: '', durationMs })
   return body
 }
