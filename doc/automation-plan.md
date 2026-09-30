@@ -48,7 +48,7 @@ head SHA 变化 ──→ 回到 new(重新评估)
 | --- | --- | --- |
 | 1 | PR 缓存 + 轮询 + Web 状态展示 | **已实施**:pr_cache/sync_state 表、poller 轮询(重入保护/项目隔离/开关)、缓存读接口、状态徽章、设置页自动化区块 |
 | 2 | AI 评估管线 | **已实施**:ai.ts(OpenAI 兼容调用/提示词模板/输入截断)、evaluatePending(硬规则/重试降级/同 SHA 去重)、AI 结论条与设置页配置 |
-| 3 | 测试执行管线 | deploy_targets 加 kind 字段;自动触发 + Web 手动发起;测试日志与历史 |
+| 3 | 测试执行管线 | test_configs 配置(本地/SSH、位置模板、命令、AI 决定)、自动+手动执行、日志与状态回写,详见 [phase-3-design.md](./phase-3-design.md) |
 | 4 | 通知、审计与打磨 | 服务端 webhook 通知(钉钉/企微)、AI 决策审计表、全局/项目级自动化开关 |
 
 ## 6. 风险与对策
