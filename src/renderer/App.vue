@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github.css'
 import DropdownSelect from './DropdownSelect.vue'
@@ -305,7 +305,7 @@ const deploymentGroups = computed<DeployGroup[]>(() => projects.value.map((proje
   project,
   targets: deploymentRows.value.filter((row) => row.projectId === project.id).sort((a, b) => a.position - b.position || a.id - b.id),
 })))
-const deployHistory = ref<Array<{ id: number; projectId: number; projectName: string; targetName: string; host: string; output: string; success: number; createdAt: string }>>([])
+const deployHistory = ref<Array<{ id: number; projectId: number; projectName: string; targetName: string; kind: string; prNumber: number; host: string; output: string; aiSummary: string; success: number; createdAt: string }>>([])
 const historyFilter = ref<number | 'all'>('all')
 const requestLogRows = ref<Array<{ id: number; projectId: number; projectName: string; endpoint: string; method: string; ok: number; status: number; errorMessage: string; durationMs: number; createdAt: string }>>([])
 const requestLogFilter = ref<number | 'all'>('all')
@@ -321,7 +321,7 @@ const showHostSuggestions = ref(false)
 const showUserSuggestions = ref(false)
 const hostSuggestions = computed(() => deploymentServers.value.map((server) => server.host))
 const userSuggestions = computed(() => [...new Set(deploymentServers.value.map((server) => server.username))])
-const deployLog = ref({ projectId: 0, projectName: '', output: '', running: false })
+const deployLog = ref({ projectId: 0, projectName: '', output: '', aiSummary: '', running: false })
 const deployOutputEl = ref<HTMLElement | null>(null)
 
 const projectFormError = ref('')
@@ -647,9 +647,9 @@ async function loadDeploymentRows() {
   loadDeployHistory()
 }
 
-function showHistory(entry: { id: number; projectId: number; projectName: string; output: string }) {
+function showHistory(entry: { id: number; projectId: number; projectName: string; output: string; aiSummary?: string }) {
   activeHistoryId.value = entry.id
-  deployLog.value = { projectId: entry.projectId, projectName: entry.projectName, output: entry.output, running: false }
+  deployLog.value = { projectId: entry.projectId, projectName: entry.projectName, output: entry.output, aiSummary: entry.aiSummary ?? '', running: false }
 }
 
 function pickHost(host: string) {
@@ -724,7 +724,7 @@ async function streamTarget(target: DeploymentRow, onChunk: (text: string) => vo
 
 async function runTargetDeployment(row: DeploymentRow) {
   if (!configComplete(row) || deployLog.value.running) return
-  deployLog.value = { projectId: row.projectId, projectName: `${row.projectName} · ${row.name || row.host}`, output: '', running: true }
+  deployLog.value = { projectId: row.projectId, projectName: `${row.projectName} · ${row.name || row.host}`, output: '', aiSummary: '', running: true }
   try {
     deployLog.value.output = await streamTarget(row, (text) => {
       deployLog.value.output += text
@@ -744,7 +744,7 @@ async function runTargetDeployment(row: DeploymentRow) {
 async function runGroupDeployment(group: DeployGroup) {
   const targets = group.targets.filter(configComplete)
   if (!targets.length || deployLog.value.running) return
-  deployLog.value = { projectId: group.project.id, projectName: group.project.name, output: '', running: true }
+  deployLog.value = { projectId: group.project.id, projectName: group.project.name, output: '', aiSummary: '', running: true }
   try {
     for (const target of targets) {
       deployLog.value.output += `\n==> [${target.name || target.host}] ${target.username}@${target.host}\n`
@@ -1193,7 +1193,9 @@ watch(activePage, (page) => {
 watch([requestLogFilter, requestLogStatus], () => { if (activePage.value === 'logs') loadRequestLogs() })
 watch([sqlPopVisible, activePage, loadingFiles], () => nextTick(updateSqlPopPosition))
 window.addEventListener('resize', updateSqlPopPosition)
+window.addEventListener('scroll', updateSqlPopPosition, true)
 onMounted(updateSqlPopPosition)
+onBeforeUnmount(() => window.removeEventListener('resize', updateSqlPopPosition))
 
 watch([errorMessage, mergeMessage], ([error, success]) => {
   const message = success || error
@@ -1299,6 +1301,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           </div>
           <div v-if="deployLog.projectId" class="settings-section deploy-log-section">
             <h2>部署日志 · {{ deployLog.projectName }}<span v-if="deployLog.running" class="deploy-running">执行中…</span></h2>
+            <div v-if="deployLog.aiSummary" class="ai-summary-card"><strong>AI 汇总</strong><p>{{ deployLog.aiSummary }}</p></div>
             <pre ref="deployOutputEl" class="deploy-output">{{ deployLog.output || '等待输出…' }}</pre>
           </div>
           <div class="settings-section">
@@ -1307,7 +1310,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             <div v-if="!filteredHistory.length" class="settings-empty">暂无部署记录。</div>
             <div v-for="entry in filteredHistory" :key="entry.id" :class="['history-row', { active: activeHistoryId === entry.id }]" @click="showHistory(entry)">
               <span :class="entry.success ? 'stat-added' : 'stat-removed'">{{ entry.success ? '✓' : '✗' }}</span>
-              <span class="history-name">{{ entry.projectName }}</span>
+              <span class="history-name">{{ entry.projectName }}<template v-if="entry.kind === 'test'"> · PR#{{ entry.prNumber }} 测试</template><template v-else-if="entry.targetName"> · {{ entry.targetName }}</template></span>
               <span class="history-host">{{ entry.host }}</span>
               <span class="history-time">{{ entry.createdAt }}</span>
             </div>

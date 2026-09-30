@@ -13,7 +13,7 @@ interface Window {
     reorderDeploymentTargets(ids: number[]): Promise<unknown>
     runDeployment(targetId: number, onChunk?: (text: string) => void): Promise<string>
     listDeploymentServers(): Promise<Array<{ host: string; username: string }>>
-    listDeploymentLogs(query?: { projectId?: number; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; targetName: string; host: string; output: string; success: number; createdAt: string }>>
+    listDeploymentLogs(query?: { projectId?: number; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; targetName: string; kind: string; prNumber: number; host: string; output: string; aiSummary: string; success: number; createdAt: string }>>
     listPullRequests(input: { repository: string; token: string }): Promise<any[]>
     cachedPulls(query?: { projectId?: number }): Promise<Array<{ projectId: number; projectName: string; repository: string; token: string; number: number; title: string; body: string; author: string; headRef: string; baseRef: string; headSha: string; state: string; statusNote: string; aiResult: string; aiEvaluatedAt: string; createdAt: string; updatedAt: string }>>
     refreshPulls(projectId?: number): Promise<{ results: Array<{ projectId: number; name: string; error: string }> }>

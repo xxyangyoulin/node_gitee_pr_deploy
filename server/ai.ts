@@ -82,6 +82,27 @@ export async function callModelJson(settings: AiSettings, prompt: string): Promi
   return JSON.parse(match[0])
 }
 
+export async function summarizeTestRun(input: { project: string; pr?: string; targets: Array<{ name: string; host: string; output: string; success: boolean }>; aiSettings: AiSettings }): Promise<string> {
+  const targetText = input.targets.map((target) => `== ${target.name} (${target.host}) ${target.success ? '通过' : '失败'} ==\n${target.output.slice(-1500)}`).join('\n\n')
+  const prompt = `以下是自动化测试的执行输出,请汇总结果:整体通过情况、失败的目标、失败原因排查(根据报错推断,如依赖缺失/编译错误/断言失败)。
+项目:${input.project}${input.pr ? `\nPR:${input.pr}` : ''}
+${targetText}
+仅输出一段简洁中文汇总(150 字内),先用一行结论,再用 1-3 条要点说明。`
+  const response = await fetch(`${input.aiSettings.aiBaseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${input.aiSettings.aiApiKey}` },
+    body: JSON.stringify({ model: input.aiSettings.aiModel, messages: [{ role: 'user', content: prompt }], temperature: 0 }),
+    signal: AbortSignal.timeout(60_000),
+  })
+  const text = await response.text()
+  if (!response.ok) throw new Error(`AI ${response.status}: ${text.slice(0, 200)}`)
+  let body: any
+  try { body = JSON.parse(text) } catch { throw new Error('AI 返回非 JSON') }
+  const content = String(body?.choices?.[0]?.message?.content ?? '').trim()
+  if (!content) throw new Error('AI 汇总为空')
+  return content.slice(0, 1000)
+}
+
 export async function callModel(settings: AiSettings, prompt: string): Promise<AiVerdict> {
   const response = await fetch(`${settings.aiBaseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',

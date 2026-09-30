@@ -306,3 +306,6 @@ button:disabled { cursor: not-allowed; }
 .checkbox-label { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px !important; }
 .test-output-row { padding: 0 14px 10px; }
 .automation-test-output { height: 180px; margin: 0; padding: 10px; overflow: auto; background: #24292f; color: #e6edf3; font-family: 'JetBrains Mono', monospace; white-space: pre-wrap; font-size: 12px; border-radius: 6px; }
+.ai-summary-card { margin-bottom: 12px; padding: 10px 14px; border: 1px solid #d4a72c; border-radius: 8px; background: #fff8c5; }
+.ai-summary-card strong { display: block; margin-bottom: 4px; font-size: 13px; color: #7d4e00; }
+.ai-summary-card p { margin: 0; font-size: 13px; line-height: 1.5; color: #1f2328; white-space: pre-wrap; }

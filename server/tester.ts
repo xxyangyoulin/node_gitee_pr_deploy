@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { buildEvaluationInput, callModelJson, renderPrompt, type AiSettings } from './ai.js'
 import { logError } from './error-log.js'
+import { summarizeTestRun } from './ai.js'
 
 export type TestCommandOption = { label: string; command: string }
 
@@ -99,7 +100,7 @@ function shellQuote(value: string) {
 
 export type TestRunHandle = { promise: Promise<{ success: boolean; logId: number }> }
 
-export function runTest(database: DatabaseSync, config: TestConfig, context: TestContext, onChunk?: (text: string) => void): TestRunHandle {
+export function runTest(database: DatabaseSync, config: TestConfig, context: TestContext, onChunk?: (text: string) => void, aiSettings?: AiSettings): TestRunHandle {
   if (projectLocks.has(context.project.id)) return { promise: Promise.reject(new Error('该项目已有测试在运行')) }
   if (globalRunning >= 2) return { promise: Promise.reject(new Error('全局测试并发已满,请稍后')) }
   projectLocks.add(context.project.id)
@@ -123,6 +124,12 @@ export function runTest(database: DatabaseSync, config: TestConfig, context: Tes
       database.prepare('UPDATE deployment_logs SET output=?, success=? WHERE id=?').run(output, success ? 1 : 0, logId)
       if (!success) logError('tester', `PR#${context.pr.number} 测试失败(退出码 ${result})`, output.slice(-500))
       updatePrState(database, context, success ? 'test_passed' : 'test_failed')
+      if (aiSettings) {
+        try {
+          const summary = await summarizeTestRun({ project: context.project.name, pr: `#${context.pr.number}`, targets: [{ name: context.pr.head_sha.slice(0, 7), host: config.server_mode === 'local' ? 'local' : config.host, output, success }], aiSettings })
+          database.prepare('UPDATE deployment_logs SET ai_summary=? WHERE id=?').run(summary, logId)
+        } catch (error) { logError('ai', `PR#${context.pr.number} 测试汇总失败`, error instanceof Error ? error.message : String(error)) }
+      }
       return { success, logId }
     } finally {
       database.prepare('UPDATE deployment_logs SET output=? WHERE id=?').run(output, logId)

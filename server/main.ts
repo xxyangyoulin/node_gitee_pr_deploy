@@ -25,6 +25,7 @@ database.exec('CREATE TABLE IF NOT EXISTS test_configs (project_id INTEGER PRIMA
 try { database.exec('ALTER TABLE test_configs ADD COLUMN source_path TEXT NOT NULL DEFAULT ""') } catch { }
 try { database.exec('ALTER TABLE deployment_logs ADD COLUMN kind TEXT NOT NULL DEFAULT "deploy"') } catch { }
 try { database.exec('ALTER TABLE deployment_logs ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0') } catch { }
+try { database.exec('ALTER TABLE deployment_logs ADD COLUMN ai_summary TEXT NOT NULL DEFAULT ""') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_result TEXT NOT NULL DEFAULT ""') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_evaluated_at TEXT NOT NULL DEFAULT ""') } catch { }
 database.exec("UPDATE pr_cache SET state='needs_test', status_note='服务重启,测试中断,可重新发起' WHERE state='testing'")
@@ -44,7 +45,7 @@ database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY A
 }
 
 import { setGiteeLogger } from './gitee.js'
-import { testModelConnection } from './ai.js'
+import { testModelConnection, summarizeTestRun } from './ai.js'
 import { homedir } from 'node:os'
 import { runTest, type TestConfig } from './tester.js'
 {
@@ -126,7 +127,7 @@ async function api(request: import('node:http').IncomingMessage, response: impor
     if (projectId) { conditions.push('project_id=?'); args.push(projectId) }
     if (kind === 'test' || kind === 'deploy') { conditions.push('kind=?'); args.push(kind) }
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''
-    const rows = database.prepare(`SELECT id, project_id AS projectId, project_name AS projectName, target_name, kind, pr_number AS prNumber, host, output, success, created_at AS createdAt FROM deployment_logs${where} ORDER BY id DESC LIMIT ?`).all(...args, limit)
+    const rows = database.prepare(`SELECT id, project_id AS projectId, project_name AS projectName, target_name, kind, pr_number AS prNumber, host, output, ai_summary AS aiSummary, success, created_at AS createdAt FROM deployment_logs${where} ORDER BY id DESC LIMIT ?`).all(...args, limit)
     return json(response, 200, rows)
   }
   if (path === '/api/deployment/servers' && request.method === 'GET') return json(response, 200, database.prepare("SELECT host,username FROM deploy_targets WHERE host != '' GROUP BY host").all())
@@ -185,9 +186,12 @@ async function api(request: import('node:http').IncomingMessage, response: impor
       const fallback = deployTarget?.remote_path ? deployTarget.remote_path.replace(/^~(?=\/|$)/, homedir()) : ''
       if (!sourcePath && !fallback) return json(response, 400, { message: '未配置测试源目录(测试配置的 source_path 或部署目标目录),无法初始化测试副本' })
     }
+    const settingsRows = database.prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>
+    const storedSettings = Object.fromEntries(settingsRows.map((row) => [row.key, row.value]))
+    const aiSettings = { aiBaseUrl: storedSettings.aiBaseUrl ?? '', aiApiKey: storedSettings.aiApiKey ?? '', aiModel: storedSettings.aiModel ?? '', aiPrompt: storedSettings.aiPrompt ?? '' }
     database.prepare("UPDATE pr_cache SET state='testing' WHERE project_id=? AND number=?").run(projectId, number)
     response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' })
-    const handle = runTest(database, config as TestConfig, { project: { id: prRow.id, name: prRow.name, repository: prRow.repository, token: prRow.token }, pr: { number: prRow.number, title: prRow.title, body: prRow.body, head_sha: prRow.headSha } }, (text) => response.write(text))
+    const handle = runTest(database, config as TestConfig, { project: { id: prRow.id, name: prRow.name, repository: prRow.repository, token: prRow.token }, pr: { number: prRow.number, title: prRow.title, body: prRow.body, head_sha: prRow.headSha } }, (text) => response.write(text), aiSettings)
     handle.promise.then(() => response.end()).catch((error) => {
       const message = error instanceof Error ? error.message : '执行失败'
       logError('tester', `手动测试发起失败 PR#${number}`, message)

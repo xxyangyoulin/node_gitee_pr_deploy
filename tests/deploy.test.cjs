@@ -124,7 +124,7 @@ function check(name, cond) {
   await page.locator('.dropdown-menu button', { hasText: 'proj-one' }).click()
   await page.waitForTimeout(200)
   const visibleNames = await page.locator('.history-row .history-name').allTextContents()
-  check('筛选后仅显示该项目记录', visibleNames.length > 0 && visibleNames.every((name) => name === 'proj-one'))
+  check('筛选后仅显示该项目记录', visibleNames.length > 0 && visibleNames.every((name) => name.includes('proj-one')))
   await page.locator('.history-filter .dropdown-toggle').click()
   await page.locator('.dropdown-menu button', { hasText: '全部项目' }).click()
   await page.waitForTimeout(200)
