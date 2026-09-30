@@ -1406,6 +1406,18 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             <label>API Key<input v-model="settings.aiApiKey" type="password" autocomplete="off" placeholder="sk-..." /></label>
             <label>模型名<input v-model="settings.aiModel" placeholder="deepseek-chat" /></label>
             <label>评估提示词(留空用默认,支持 <code v-pre>{{title}}</code>/<code v-pre>{{body}}</code>/<code v-pre>{{files}}</code>/<code v-pre>{{diff}}</code> 变量)<textarea v-model="settings.aiPrompt" rows="5" class="ai-prompt"></textarea></label>
+            <details class="default-prompt-details">
+              <summary>查看默认提示词{{ settings.aiPrompt ? '(当前使用自定义)' : '(当前生效)' }}</summary>
+              <pre class="default-prompt-view">你是代码评审助手。根据以下 PR 信息判断该变更是否需要运行自动化测试。
+规则:.sql 文件变更一律需要测试;仅文档/注释/格式化改动通常不需要。
+PR 标题:{{ "{{title}}" }}
+PR 描述:{{ "{{body}}" }}
+变更文件:
+{{ "{{files}}" }}
+关键 diff:
+{{ "{{diff}}" }}
+仅输出 JSON:{"needs_test": true|false, "reason": "一句话理由", "risk_level": "low"|"medium"|"high"}</pre>
+            </details>
             <div class="ai-test-row"><button type="button" :disabled="aiTesting" @click="testAi">{{ aiTesting ? '测试中…' : '测试连接' }}</button><span v-if="aiTestMessage" :class="aiTestMessage.startsWith('连接成功') ? 'stat-added' : 'stat-removed'">{{ aiTestMessage }}</span></div>
             <button class="primary" type="submit">保存设置</button>
           </form>
