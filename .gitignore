@@ -7,3 +7,6 @@ release-console.sqlite
 tests/screenshots/
 *.log
 build/
+
+# 测试工作目录(字面 ~ 目录为历史 bug 遗留)
+~/TEST/

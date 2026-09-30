@@ -1,6 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
+import { homedir } from 'node:os'
 import { buildEvaluationInput, callModelJson, renderPrompt, type AiSettings } from './ai.js'
+import { logError } from './error-log.js'
 
 export type TestCommandOption = { label: string; command: string }
 
@@ -69,9 +71,11 @@ async function fetchPrFiles(project: TestContext['project'], number: number) {
 }
 
 function buildScript(context: TestContext, config: TestConfig, command: string) {
-  const workdir = (config.workdir_template || '~/TEST/{project}_{pr}')
+  let workdir = (config.workdir_template || '~/TEST/{project}_{pr}')
+    .replace(/^~(?=\/|$)/, homedir())
     .replaceAll('{project}', context.project.name)
     .replaceAll('{pr}', String(context.pr.number))
+  if (workdir.startsWith('~')) workdir = homedir() + workdir.slice(1)
   const cloneUrl = `https://oauth2:${context.project.token}@gitee.com/${context.project.repository}.git`
   return [
     `mkdir -p ${shellQuote(workdir)}`,
@@ -106,10 +110,12 @@ export function runTest(database: DatabaseSync, config: TestConfig, context: Tes
       if (note) output += `[${note}]\n`
       const script = buildScript(context, config, option.command)
       const result = await execute(config, script, (text) => { output += text; onChunk?.(text) })
-      const marker = result === 0 ? '\n[测试通过]' : result === 'timeout' ? '\n[执行超时]' : `\n[测试失败,退出码 ${result}]`
+      const hint = result === 127 ? '\n提示:命令不存在,可能需要先安装依赖(如 composer install / npm install)' : ''
+      const marker = result === 0 ? '\n[测试通过]' : result === 'timeout' ? '\n[执行超时]' : `\n[测试失败,退出码 ${result}]${hint}`
       output += marker
       const success = result === 0
       database.prepare('UPDATE deployment_logs SET output=?, success=? WHERE id=?').run(output, success ? 1 : 0, logId)
+      if (!success) logError('tester', `PR#${context.pr.number} 测试失败(退出码 ${result})`, output.slice(-500))
       updatePrState(database, context, success ? 'test_passed' : 'test_failed')
       return { success, logId }
     } finally {

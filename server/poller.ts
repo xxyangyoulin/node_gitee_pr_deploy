@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { gitee } from './gitee.js'
+import { logError } from './error-log.js'
 import { buildEvaluationInput, callModel, renderPrompt, DEFAULT_PROMPT, type AiSettings } from './ai.js'
 import { runTest, type TestConfig } from './tester.js'
 
@@ -70,7 +71,7 @@ export async function pollProject(database: DatabaseSync, project: Project) {
       const detail = await gitee(projectInput(project), `pulls/${row.number}`)
       const finalState = detail.state === 'open' ? 'open' : (detail.merged ? 'merged' : 'closed')
       if (finalState !== 'open') database.prepare("UPDATE pr_cache SET state=?, synced_at=? WHERE project_id=? AND number=?").run(finalState, syncedAt, project.id, row.number)
-    } catch { /* 详情查询失败留给下轮 */ }
+    } catch (error) { logError('poller', `确认 PR #${row.number} 状态失败`, error instanceof Error ? error.message : String(error)) }
   }
   return { changed, synced: list.length }
 }
@@ -94,6 +95,7 @@ export async function pollAll(database: DatabaseSync, projectId = 0) {
         const message = error instanceof Error ? error.message : '同步失败'
         database.prepare('INSERT INTO sync_state(project_id,last_sync_at,last_error,enabled) VALUES(?,?,?,1) ON CONFLICT(project_id) DO UPDATE SET last_error=excluded.last_error').run(project.id, now(), message)
         results.push({ projectId: project.id, name: project.name, error: message })
+        logError('poller', `项目 ${project.name} 同步失败`, message)
       }
     }
   }
@@ -165,7 +167,7 @@ export async function runPendingTests(database: DatabaseSync) {
     if (!config) continue
     if (config.server_mode === 'ssh' && (!config.host || !config.username)) continue
     database.prepare("UPDATE pr_cache SET state='testing' WHERE project_id=? AND number=?").run(row.project_id, row.number)
-    void runTest(database, config as TestConfig, { project: { id: row.project_id, name: row.name, repository: row.repository, token: row.token }, pr: { number: row.number, title: row.title, body: row.body, head_sha: row.headSha } }).promise.catch(() => { })
+    void runTest(database, config as TestConfig, { project: { id: row.project_id, name: row.name, repository: row.repository, token: row.token }, pr: { number: row.number, title: row.title, body: row.body, head_sha: row.headSha } }).promise.catch((error) => { logError('tester', `自动测试发起失败 PR#${row.number}`, error instanceof Error ? error.message : String(error)) })
   }
 }
 

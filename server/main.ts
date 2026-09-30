@@ -5,11 +5,13 @@ import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
 import { gitee } from './gitee.js'
 import { startPoller, pollAll, evaluateManual } from './poller.js'
+import { initErrorLog, logError, listErrors } from './error-log.js'
 
 const port = Number(process.env.PORT) || 18763
 const root = process.cwd()
 const databasePath = join(root, 'release-console.sqlite')
 const database = new DatabaseSync(databasePath)
+initErrorLog(database)
 const version = (() => { try { return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version ?? '' } catch { return '' } })()
 database.exec('CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, repository TEXT NOT NULL, token TEXT NOT NULL DEFAULT "", open_prs INTEGER NOT NULL DEFAULT 0)')
 database.exec('CREATE TABLE IF NOT EXISTS deployment_configs (project_id INTEGER PRIMARY KEY, host TEXT NOT NULL DEFAULT "", username TEXT NOT NULL DEFAULT "", remote_path TEXT NOT NULL DEFAULT "", command TEXT NOT NULL DEFAULT "")')
@@ -179,8 +181,10 @@ async function api(request: import('node:http').IncomingMessage, response: impor
     response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' })
     const handle = runTest(database, config as TestConfig, { project: { id: prRow.id, name: prRow.name, repository: prRow.repository, token: prRow.token }, pr: { number: prRow.number, title: prRow.title, body: prRow.body, head_sha: prRow.headSha } }, (text) => response.write(text))
     handle.promise.then(() => response.end()).catch((error) => {
+      const message = error instanceof Error ? error.message : '执行失败'
+      logError('tester', `手动测试发起失败 PR#${number}`, message)
       database.prepare("UPDATE pr_cache SET state='needs_test' WHERE project_id=? AND number=? AND state='testing'").run(projectId, number)
-      response.write(`\n[错误] ${error instanceof Error ? error.message : '执行失败'}`)
+      response.write(`\n[错误] ${message}`)
       response.end()
     })
     return
@@ -198,6 +202,10 @@ async function api(request: import('node:http').IncomingMessage, response: impor
       const reply = await testModelConnection(aiSettings)
       return json(response, 200, { message: `连接成功:${reply}` })
     } catch (error) { return json(response, 500, { message: error instanceof Error ? error.message : '连接失败' }) }
+  }
+  if (path === '/api/error-logs' && request.method === 'GET') {
+    const params = new URL(request.url || '', 'http://localhost').searchParams
+    return json(response, 200, listErrors(params.get('source') || '', Math.min(Number(params.get('limit')) || 100, 300)))
   }
   if (path === '/api/request-logs' && request.method === 'GET') {
     const params = new URL(request.url || '', 'http://localhost').searchParams

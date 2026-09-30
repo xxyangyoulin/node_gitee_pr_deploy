@@ -57,6 +57,7 @@ async function main() {
   check('ssh 拼接主机与 BatchMode', lastArgs[0] === 'ssh' && lastScript.includes('deployer@test.host') && lastScript.includes('BatchMode=yes'))
   check('脚本含条件 clone', lastScript.includes('git clone'))
   check('脚本含 fetch 与 checkout SHA', lastScript.includes('git fetch --all --prune') && lastScript.includes("checkout -f 'abc123'"))
+  check('~ 展开为绝对家目录(不带引号问题)', lastScript.includes("mkdir -p '/home/") && !lastScript.includes("mkdir -p '~"))
   check('AI 选中第二个命令(--filter)', lastScript.includes('phpunit --filter x'))
   check('状态回写 test_passed', db.prepare("SELECT state FROM pr_cache WHERE number=13").get().state === 'test_passed')
   const log1 = db.prepare('SELECT * FROM deployment_logs').get()
