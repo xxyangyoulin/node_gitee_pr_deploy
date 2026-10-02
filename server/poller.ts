@@ -80,9 +80,9 @@ export async function pollAll(database: DatabaseSync, projectId = 0) {
   const projects = (projectId
     ? database.prepare('SELECT id,name,repository,token FROM projects WHERE id=?').all(projectId) as any[]
     : database.prepare('SELECT id,name,repository,token FROM projects').all() as any[]).filter((project) => project.repository)
-  const enabled = new Set((database.prepare('SELECT project_id FROM sync_state WHERE enabled=1').all() as any[]).map((row) => row.project_id))
+  const disabled = new Set((database.prepare('SELECT project_id FROM sync_state WHERE enabled=0').all() as any[]).map((row) => row.project_id))
   const results: Array<{ projectId: number; name: string; error: string }> = []
-  const queue = projects.filter((project) => !enabled.size || enabled.has(project.id))
+  const queue = projects.filter((project) => !disabled.has(project.id))
   const worker = async () => {
     for (;;) {
       const project = queue.shift()

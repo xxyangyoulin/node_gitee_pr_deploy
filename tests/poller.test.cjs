@@ -14,6 +14,7 @@ globalThis.fetch = async (url) => {
   calls.count += 1
   const repository = String(url).split('/repos/')[1]?.split('/').slice(0, 2).join('/')
   if (repository === 'owner/one') return { ok: true, text: async () => JSON.stringify(PRS['owner/one']) }
+  if (repository === 'owner/fresh') return { ok: true, text: async () => JSON.stringify(PRS['owner/fresh'] ?? []) }
   return { ok: false, status: 500, text: async () => JSON.stringify({ message: 'token 失效' }) }
 }
 
@@ -78,6 +79,13 @@ async function main() {
   const callsBefore = calls.count
   await pollAll(db)
   check('停用项目不轮询', calls.count === callsBefore + 1) // 仅 bad 项目(仍启用)发起请求
+
+  // 6.5 新项目(无 sync_state 行)默认轮询
+  db.prepare("INSERT INTO projects (id,name,repository) VALUES (3,'fresh','owner/fresh')").run()
+  PRS['owner/fresh'] = []
+  await pollAll(db)
+  const fresh = db.prepare('SELECT last_sync_at FROM sync_state WHERE project_id=3').get()
+  check('新项目无 sync_state 行默认轮询', !!fresh?.last_sync_at)
 
   // 7. 间隔下限保护
   db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('pollIntervalSec','10')").run()
