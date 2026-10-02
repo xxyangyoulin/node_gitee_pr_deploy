@@ -76,11 +76,13 @@ export async function pollProject(database: DatabaseSync, project: Project) {
   return { changed, synced: list.length }
 }
 
-export async function pollAll(database: DatabaseSync, projectId = 0) {
+export async function pollAll(database: DatabaseSync, projectId = 0, options: { ignoreDisabled?: boolean } = {}) {
   const projects = (projectId
     ? database.prepare('SELECT id,name,repository,token FROM projects WHERE id=?').all(projectId) as any[]
     : database.prepare('SELECT id,name,repository,token FROM projects').all() as any[]).filter((project) => project.repository)
-  const disabled = new Set((database.prepare('SELECT project_id FROM sync_state WHERE enabled=0').all() as any[]).map((row) => row.project_id))
+  const disabled = options.ignoreDisabled
+    ? new Set<number>()
+    : new Set((database.prepare('SELECT project_id FROM sync_state WHERE enabled=0').all() as any[]).map((row) => row.project_id))
   const results: Array<{ projectId: number; name: string; error: string }> = []
   const queue = projects.filter((project) => !disabled.has(project.id))
   const worker = async () => {

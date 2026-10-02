@@ -87,6 +87,13 @@ async function main() {
   const fresh = db.prepare('SELECT last_sync_at FROM sync_state WHERE project_id=3').get()
   check('新项目无 sync_state 行默认轮询', !!fresh?.last_sync_at)
 
+  // 6.6 停用项目:自动轮询跳过,手动刷新(ignoreDisabled)强制拉取
+  db.prepare('UPDATE sync_state SET enabled=0 WHERE project_id=1').run()
+  const callsBeforeManual = calls.count
+  await pollAll(db, 0, { ignoreDisabled: true })
+  check('手动刷新忽略停用标志', calls.count > callsBeforeManual)
+  db.prepare('UPDATE sync_state SET enabled=1 WHERE project_id=1').run()
+
   // 7. 间隔下限保护
   db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('pollIntervalSec','10')").run()
   check('间隔最小 60s', readPollIntervalSec(db) === 60)

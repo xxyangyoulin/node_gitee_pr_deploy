@@ -158,7 +158,7 @@ async function api(request: import('node:http').IncomingMessage, response: impor
     })))
   }
   if (path === '/api/pulls/refresh' && request.method === 'POST') {
-    const results = await pollAll(database, Number(input.projectId) || 0)
+    const results = await pollAll(database, Number(input.projectId) || 0, { ignoreDisabled: true })
     return json(response, 200, { results })
   }
   if (path === '/api/sync/status' && request.method === 'GET') {
