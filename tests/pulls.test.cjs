@@ -260,6 +260,7 @@ function check(name, cond) {
   await mergeBtn.click(); await mergeBtn.click()
   await page.waitForTimeout(300)
   check('二次点击执行合并(仅 mock)', saved.merges.at(-1)?.repository === 'owner/proj-two' && saved.merges.at(-1)?.number === 12)
+  check('合并完成后强制同步该项目', saved.refreshes.at(-1) === 2)
 
   await page.screenshot({ path: shot('pulls-final.png') })
 

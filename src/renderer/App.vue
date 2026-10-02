@@ -940,7 +940,7 @@ async function mergeSelectedPull() {
     reviewPassed.value = true
     testPassed.value = true
     mergeMessage.value = '合并成功'
-    await loadPulls()
+    await syncProjectPulls(target.project.id)
   } catch (error) { mergeMessage.value = error instanceof Error ? error.message : '合并失败' }
 }
 
@@ -1058,7 +1058,7 @@ async function runOneClick() {
     }
     mergeMessage.value = run.withDeploy ? '一键部署完成' : '一键合并完成'
     if (run.withDeploy) notifyDesktop('一键部署完成', `${run.project.name} 全流程成功`)
-    await loadPulls()
+    await syncProjectPulls(run.project.id)
   } catch (error) {
     run.failed = true
     const message = error instanceof Error ? error.message : '一键操作失败'
@@ -1143,7 +1143,7 @@ async function submitCreatePr() {
     await window.releaseConsole.createPullRequest({ repository: project.repository, token: project.token, title: createPrForm.value.title.trim(), head: createPrForm.value.head.trim(), base: createPrForm.value.base.trim() })
     showCreatePr.value = false
     mergeMessage.value = 'PR 创建成功'
-    await loadPulls()
+    await syncProjectPulls(project.id)
   } catch (error) { createPrError.value = error instanceof Error ? error.message : '创建 PR 失败' } finally { creatingPr.value = false }
 }
 
