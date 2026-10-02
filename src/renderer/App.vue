@@ -965,20 +965,31 @@ function requestOneClick(kind: 'master' | 'deploy') {
   void runOneClick()
 }
 
+async function syncProjectPulls(projectId: number) {
+  try { await window.releaseConsole.refreshPulls(projectId) } catch { }
+  await loadPulls()
+}
+
+function matchCreatedPull(project: Project, title: string) {
+  return pulls.value.find((item) => item.project.id === project.id && String(item.pull.head?.ref) === settings.value.prHead && String(item.pull.base?.ref) === settings.value.prBase && String(item.pull.title ?? '') === title)?.pull ?? null
+}
+
 async function findCreatedPull(project: Project, title: string) {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await loadPulls()
-    const found = pulls.value.find((item) => item.project.id === project.id && String(item.pull.head?.ref) === settings.value.prHead && String(item.pull.base?.ref) === settings.value.prBase && String(item.pull.title ?? '') === title)
-    if (found) return found.pull
-    await new Promise((resolve) => setTimeout(resolve, 500))
+  // 创建后 Gitee 列表可能短暂不可见(最终一致性),且本地缓存需强制同步才会更新:
+  // 每轮先触发服务端即时轮询再读缓存,重试 8 次 × 1s
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await syncProjectPulls(project.id)
+    const found = matchCreatedPull(project, title)
+    if (found) return found
+    await new Promise((resolve) => setTimeout(resolve, 1000))
   }
-  throw new Error('未找到新创建的 PR')
+  throw new Error(`创建 PR 后 ${8}s 内未在 Gitee 列表中出现,可在 PR 页刷新后手动合并`)
 }
 
 async function findCreatedPullQuiet(project: Project, title: string) {
   try {
-    await loadPulls()
-    return pulls.value.find((item) => item.project.id === project.id && String(item.pull.head?.ref) === settings.value.prHead && String(item.pull.base?.ref) === settings.value.prBase && String(item.pull.title ?? '') === title)?.pull ?? null
+    await syncProjectPulls(project.id)
+    return matchCreatedPull(project, title)
   } catch { return null }
 }
 

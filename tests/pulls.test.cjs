@@ -10,7 +10,7 @@ const PRS_TWO = [
   { number: 12, title: 'two fix', user: { login: 'carol' }, head: { ref: 'fix-y' }, base: { ref: 'master' }, created_at: '2026-09-27T23:59:00+08:00' },
   { number: 11, title: 'two feature', user: { login: 'bob' }, head: { ref: 'feat-x' }, base: { ref: 'main' }, created_at: '2026-09-25T08:05:00+08:00' },
 ]
-const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [], testRuns: [] }
+const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [], testRuns: [], refreshes: [] }
 const mergedNumbers = []
 let createdNumber = 13
 let merge14Failed = false
@@ -78,6 +78,7 @@ function check(name, cond) {
       return route.fulfill({ json: { verdict } })
     }
     if (path === '/api/pulls/refresh') {
+      saved.refreshes.push(req.postDataJSON().projectId ?? 0)
       if (projTwoPullsFail) return route.fulfill({ json: { results: [{ projectId: 2, name: 'proj-two', error: 'mock token 失效' }] } })
       return route.fulfill({ json: { results: [{ projectId: 1, name: 'proj-one', error: '' }, { projectId: 2, name: 'proj-two', error: '' }] } })
     }
@@ -213,6 +214,7 @@ function check(name, cond) {
   check('阶段二合并新建 PR #14', JSON.stringify(saved.merges.map((item) => item.number)) === JSON.stringify([13, 14]))
   check('重试未重复前置步骤', saved.creates.length === 1)
   check('重试仅重跑失败目标 web-2', JSON.stringify(saved.runs) === JSON.stringify([21, 22, 22]))
+  check('查找新 PR 前触发了强制同步', saved.refreshes.includes(2))
   check('审查+测试覆盖两个 PR(重试合法重复)', JSON.stringify([...new Set(saved.approves.map((item) => item.number))].sort((a, b) => a - b)) === JSON.stringify([13, 14]) && saved.approves.at(-1)?.number === 14 && saved.tests.at(-1)?.number === 14)
   check('弹窗内显示部署日志', (await page.locator('.one-click-modal .deploy-output').textContent()).includes('[部署完成]'))
   check('弹窗显示部署目标(项目2 web-2)', (await page.locator('.deploy-target-info').first().textContent()).includes('web-2'))
