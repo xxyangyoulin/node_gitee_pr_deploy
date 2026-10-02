@@ -96,6 +96,7 @@ function check(name, cond) {
     if (path === '/api/gitee/test-pull') { saved.tests.push(req.postDataJSON()); return route.fulfill({ json: {} }) }
     if (path === '/api/gitee/merge-pull') {
       const input = req.postDataJSON()
+      if (input.number === 15) return route.fulfill({ status: 405, json: { message: 'Pull Request 已合并或已关闭。' } })
       saved.merges.push(input)
       mergedNumbers.push(input.number)
       return route.fulfill({ json: {} })

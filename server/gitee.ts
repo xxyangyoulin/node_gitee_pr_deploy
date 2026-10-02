@@ -10,6 +10,16 @@ export function setGiteeLogger(fn: GiteeLogger) {
   logger = fn
 }
 
+async function fetchWithRetry(url: URL, init: RequestInit | undefined): Promise<Response> {
+  let response = await fetch(url, init)
+  // Gitee 网关瞬时故障(502/503/504)重试一次
+  if (response.status >= 502 && response.status <= 504) {
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    response = await fetch(url, init)
+  }
+  return response
+}
+
 export async function gitee(input: Input, endpoint: string, init?: RequestInit) {
   const url = new URL(`https://gitee.com/api/v5/repos/${input.repository}/${endpoint}`)
   url.searchParams.set('access_token', input.token)
@@ -17,7 +27,7 @@ export async function gitee(input: Input, endpoint: string, init?: RequestInit) 
   const startedAt = Date.now()
   let response: Response
   try {
-    response = await fetch(url, init)
+    response = await fetchWithRetry(url, init)
   } catch (error) {
     const durationMs = Date.now() - startedAt
     const errorMessage = error instanceof Error ? error.message : '网络错误'

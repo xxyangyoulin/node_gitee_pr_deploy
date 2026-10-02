@@ -926,9 +926,19 @@ async function mergeFlow(project: Project, pull: any) {
   const state = String(pull?.state ?? '')
   if (state === 'merged') return
   if (state === 'closed') throw new Error(`PR #${pull.number} 已关闭，无法合并`)
-  await window.releaseConsole.approvePullRequest({ repository: project.repository, token: project.token, number: Number(pull.number) })
+  try {
+    await window.releaseConsole.approvePullRequest({ repository: project.repository, token: project.token, number: Number(pull.number) })
+  } catch (error) {
+    if (!/已合并/.test(error instanceof Error ? error.message : '')) throw error
+  }
   await window.releaseConsole.testPullRequest({ repository: project.repository, token: project.token, number: Number(pull.number) })
-  await window.releaseConsole.mergePullRequest({ repository: project.repository, token: project.token, number: Number(pull.number), mergeMethod: settings.value.mergeMethod })
+  try {
+    await window.releaseConsole.mergePullRequest({ repository: project.repository, token: project.token, number: Number(pull.number), mergeMethod: settings.value.mergeMethod })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (/已合并/.test(message)) return // 幂等:上一轮已合并成功
+    throw error
+  }
 }
 
 async function mergeSelectedPull() {
@@ -1042,15 +1052,26 @@ async function runOneClick() {
         if (existing) {
           run.created = existing
         } else {
-          await window.releaseConsole.createPullRequest({ repository: run.project.repository, token: run.project.token, title: run.title, head: settings.value.prHead, base: settings.value.prBase })
-          run.created = await findCreatedPull(run.project, run.title)
+          try {
+            await window.releaseConsole.createPullRequest({ repository: run.project.repository, token: run.project.token, title: run.title, head: settings.value.prHead, base: settings.value.prBase })
+            run.created = await findCreatedPull(run.project, run.title)
+          } catch (error) {
+            const message = error instanceof Error ? error.message : ''
+            if (/不存在差异/.test(message)) {
+              run.log += '\n[dock 与 master 无差异,变更已在 master,跳过二级 PR]'
+              run.created2 = true
+              run.merged2 = true
+              run.created = null
+            } else throw error
+          }
         }
         run.created2 = true
       }
-      if (!run.merged2) {
+      if (!run.merged2 && run.created) {
         await mergeFlow(run.project, run.created)
         run.merged2 = true
       }
+      run.merged2 = true
     }
     if (run.withDeploy && !run.deployed) {
       await runDeployStage(run)
