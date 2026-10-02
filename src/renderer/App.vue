@@ -923,6 +923,9 @@ async function openPull(item: PullItem, seq: number) {
 }
 
 async function mergeFlow(project: Project, pull: any) {
+  const state = String(pull?.state ?? '')
+  if (state === 'merged') return
+  if (state === 'closed') throw new Error(`PR #${pull.number} 已关闭，无法合并`)
   await window.releaseConsole.approvePullRequest({ repository: project.repository, token: project.token, number: Number(pull.number) })
   await window.releaseConsole.testPullRequest({ repository: project.repository, token: project.token, number: Number(pull.number) })
   await window.releaseConsole.mergePullRequest({ repository: project.repository, token: project.token, number: Number(pull.number), mergeMethod: settings.value.mergeMethod })
@@ -971,7 +974,9 @@ async function syncProjectPulls(projectId: number) {
 }
 
 function matchCreatedPull(project: Project, title: string) {
-  return pulls.value.find((item) => item.project.id === project.id && String(item.pull.head?.ref) === settings.value.prHead && String(item.pull.base?.ref) === settings.value.prBase && String(item.pull.title ?? '') === title)?.pull ?? null
+  const candidates = pulls.value.filter((item) => item.project.id === project.id && !isEndedPull(item) && String(item.pull.head?.ref) === settings.value.prHead && String(item.pull.base?.ref) === settings.value.prBase)
+  // 优先同名;否则复用同分支的任意开放 PR(避免 Gitee 拒绝重复创建)
+  return candidates.find((item) => String(item.pull.title ?? '') === title)?.pull ?? candidates[0]?.pull ?? null
 }
 
 async function findCreatedPull(project: Project, title: string) {
@@ -998,9 +1003,7 @@ async function runDeployStage(run: OneClickRun) {
     const logs = await window.releaseConsole.listDeploymentLogs({ projectId: run.project.id, limit: 1 })
     run.lastDeploy = logs[0] ? { createdAt: logs[0].createdAt, success: logs[0].success } : null
   } catch { }
-  console.log('[runDeployStage] project:', run.project.id, run.project.name, '| rows:', deploymentRows.value.length)
   if (!deploymentRows.value.length) { try { await loadDeploymentRows() } catch { } }
-  console.log('[runDeployStage] rows after load:', deploymentRows.value.map((r) => `${r.projectId}:${r.name}`).join(','))
   const targets = deploymentRows.value
     .filter((row) => row.projectId === run.project.id && configComplete(row))
     .sort((a, b) => a.position - b.position || a.id - b.id)

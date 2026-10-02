@@ -34,7 +34,7 @@ function check(name, cond) {
     if (path === '/api/projects') return route.fulfill({ json: PROJECTS })
     if (path === '/api/settings') return route.fulfill({ json: { prHead: 'dock', prBase: 'master', mergeMethod: 'merge' } })
     if (path === '/api/pulls') {
-      const open = [...PRS_ONE, ...PRS_TWO].filter((pull) => !mergedNumbers.includes(pull.number))
+      const open = [...PRS_ONE, ...PRS_TWO, { number: 4, title: 'chore deps', state: 'merged', merged: true, user: { name: 'old' }, head: { ref: 'dock' }, base: { ref: 'master' }, created_at: '2026-09-01T00:00:00+08:00', __project: 2 }].filter((pull) => !mergedNumbers.includes(pull.number))
       const ended = [
         { number: 5, title: 'old feature', state: 'merged', user: { name: 'erin' }, head: { ref: 'feat-old' }, base: { ref: 'master' }, created_at: '2026-09-10T08:00:00+08:00', __project: 1 },
         { number: 6, title: 'abandoned', state: 'closed', user: { name: 'frank' }, head: { ref: 'wip' }, base: { ref: 'master' }, created_at: '2026-09-11T08:00:00+08:00', __project: 2 },
@@ -153,7 +153,7 @@ function check(name, cond) {
   check('默认进行中 tab 不含已结束 PR', (await page.locator('.pr-item', { hasText: '#5' }).count()) === 0 && (await page.locator('.pr-item').count()) === 4)
   await page.locator('.pr-list-tabs button', { hasText: '已结束' }).click()
   await page.waitForTimeout(100)
-  check('已结束 tab 展示历史 PR', (await page.locator('.pr-item').count()) === 2 && (await page.locator('.pr-item', { hasText: 'old feature' }).count()) === 1)
+  check('已结束 tab 展示历史 PR', (await page.locator('.pr-item').count()) === 3 && (await page.locator('.pr-item', { hasText: 'old feature' }).count()) === 1 && (await page.locator('.pr-item', { hasText: '#4' }).count()) === 1)
   check('已结束徽章标注', (await page.locator('.pr-item', { hasText: 'old feature' }).locator('.state-badge').textContent()) === '已合并')
   await page.locator('.pr-list-tabs button', { hasText: '进行中' }).click()
   await page.waitForTimeout(100)
@@ -210,8 +210,9 @@ function check(name, cond) {
   await page.waitForTimeout(2500)
   check('重试后 4 步全部完成', (await page.locator('.progress-steps li.done').count()) === 4)
   check('阶段一合并 #13', saved.merges[0]?.number === 13)
+  check('同名已合并 PR 不阻止创建', saved.creates.length === 1 && saved.creates[0].repository === 'owner/proj-two')
   check('自动创建 dock→master PR', saved.creates.at(-1)?.repository === 'owner/proj-two' && saved.creates.at(-1)?.head === 'dock' && saved.creates.at(-1)?.base === 'master' && saved.creates.at(-1)?.title === 'chore deps')
-  check('阶段二合并新建 PR #14', JSON.stringify(saved.merges.map((item) => item.number)) === JSON.stringify([13, 14]))
+  check('阶段二合并新建 PR #14(而非历史 #5)', JSON.stringify(saved.merges.map((item) => item.number)) === JSON.stringify([13, 14]) && !saved.merges.some((item) => item.number === 4))
   check('重试未重复前置步骤', saved.creates.length === 1)
   check('重试仅重跑失败目标 web-2', JSON.stringify(saved.runs) === JSON.stringify([21, 22, 22]))
   check('查找新 PR 前触发了强制同步', saved.refreshes.includes(2))
