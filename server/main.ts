@@ -294,8 +294,8 @@ createServer(async (request, response) => {
     const type = extname(target) === '.js' ? 'text/javascript' : extname(target) === '.css' ? 'text/css' : 'text/html'
     response.writeHead(200, { 'content-type': `${type}; charset=utf-8` }); response.end(content)
   } catch (error) { json(response, 500, { message: error instanceof Error ? error.message : '服务器错误' }) }
-}).listen(port, '127.0.0.1', () => {
-  console.log(`Gitee Release Console: http://127.0.0.1:${port}`)
+}).listen(port, process.env.HOST ?? '0.0.0.0', () => {
+  console.log(`Gitee Release Console: http://${process.env.HOST === '127.0.0.1' ? '127.0.0.1' : '0.0.0.0'}:${port}(局域网可访问)`) 
   pollerHandle = startPoller(database)
 })
 let pollerHandle: ReturnType<typeof startPoller> | undefined
