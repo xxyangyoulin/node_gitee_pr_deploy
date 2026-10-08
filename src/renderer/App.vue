@@ -1000,7 +1000,10 @@ async function mergeSelectedPull() {
     testPassed.value = true
     mergeMessage.value = '合并成功'
     await syncProjectPulls(target.project.id)
-  } catch (error) { mergeMessage.value = error instanceof Error ? error.message : '合并失败' }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '合并失败'
+    mergeMessage.value = /不可自动合并/.test(message) ? `${message}(存在冲突,请在 Gitee 页面手动处理后再试)` : message
+  }
 }
 
 function resetOneClickConfirm() {
@@ -1139,7 +1142,8 @@ async function runOneClick() {
     await syncProjectPulls(run.project.id)
   } catch (error) {
     run.failed = true
-    const message = error instanceof Error ? error.message : '一键操作失败'
+    let message = error instanceof Error ? error.message : '一键操作失败'
+    if (/不可自动合并/.test(message)) message += '(存在冲突,请在 Gitee 页面手动处理后再试)'
     mergeMessage.value = message
     if (message !== '已取消') notifyDesktop(run.withDeploy ? '一键部署失败' : '一键合并失败', `${run.project.name}：${message}`)
   } finally {

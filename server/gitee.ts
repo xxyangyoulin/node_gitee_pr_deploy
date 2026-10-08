@@ -11,7 +11,14 @@ export function setGiteeLogger(fn: GiteeLogger) {
 }
 
 async function fetchWithRetry(url: URL, init: RequestInit | undefined): Promise<Response> {
-  let response = await fetch(url, init)
+  let response: Response
+  try {
+    response = await fetch(url, init)
+  } catch {
+    // 网络层抖动(fetch failed/DNS)延迟重试一次
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    response = await fetch(url, init)
+  }
   // Gitee 网关瞬时故障(502/503/504)重试一次
   if (response.status >= 502 && response.status <= 504) {
     await new Promise((resolve) => setTimeout(resolve, 2000))
