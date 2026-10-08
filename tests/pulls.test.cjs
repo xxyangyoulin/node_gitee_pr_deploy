@@ -150,6 +150,11 @@ function check(name, cond) {
   await page.locator('.dropdown-menu button', { hasText: '全部项目' }).click()
   await page.waitForTimeout(100)
 
+  // 双击分支徽章复制
+  await page.locator('.pr-item').first().locator('.branch-head').dblclick()
+  await page.waitForTimeout(200)
+  check('双击复制后 toast 提示', (await page.locator('.toast').textContent().catch(() => '')).includes('已复制分支'))
+
   // 分组 tab:默认进行中(不含已结束),可切换已结束
   check('默认进行中 tab 不含已结束 PR', (await page.locator('.pr-item', { hasText: '#5' }).count()) === 0 && (await page.locator('.pr-item').count()) === 4)
   await page.locator('.pr-list-tabs button', { hasText: '已结束' }).click()

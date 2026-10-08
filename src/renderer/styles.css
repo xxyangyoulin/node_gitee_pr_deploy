@@ -341,3 +341,4 @@ button:disabled { cursor: not-allowed; }
 .md-body a { color: #0969da; }
 .md-body hr { border: 0; border-top: 1px solid #d8dee4; margin: 16px 0; }
 .copy-btn.md-toggle.active { color: #fff; background: #8250df; border-color: #8250df; }
+.branch-chip { user-select: none; }
