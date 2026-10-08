@@ -102,6 +102,24 @@ const selectedAiVerdict = computed<{ needs_test: boolean; reason: string; risk_l
 })
 
 const settingsTab = ref<'general' | 'automation' | 'ai' | 'projects' | 'about'>('general')
+const automationPanelOpen = ref(false)
+
+const automationSummary = computed(() => {
+  const item = selectedPull.value
+  if (!item) return ''
+  const parts: string[] = []
+  const verdict = selectedAiVerdict.value
+  if (evaluatingPr.value || item.pull.state === 'ai_reviewing') parts.push('AI 评审中')
+  else if (verdict) parts.push(`AI:${verdict.needs_test ? '需测试' : '无需'}·${verdict.risk_level}`)
+  else parts.push('AI 未评审')
+  if (runningTest.value || item.pull.state === 'testing') parts.push('测试中')
+  else if (item.pull.state === 'test_passed') parts.push('测试✓')
+  else if (item.pull.state === 'test_failed') parts.push('测试✗')
+  else parts.push('测试未执行')
+  parts.push(reviewPassed.value ? '审查✓' : '审查未标')
+  parts.push(testPassed.value ? '人工测试✓' : '人工测试未标')
+  return parts.join(' · ')
+})
 const aiTesting = ref(false)
 const aiTestMessage = ref('')
 const evaluatingPr = ref(false)
@@ -178,6 +196,7 @@ async function saveTestConfig() {
 async function runSelectedTest() {
   const target = selectedPull.value
   if (!target || runningTest.value) return
+  automationPanelOpen.value = true
   runningTest.value = true
   testOutput.value = ''
   target.pull.state = 'testing'
@@ -203,6 +222,7 @@ async function runSelectedTest() {
 async function reevaluateSelected() {
   const target = selectedPull.value
   if (!target || evaluatingPr.value) return
+  automationPanelOpen.value = true
   evaluatingPr.value = true
   try {
     const { verdict } = await window.releaseConsole.evaluatePr({ projectId: target.project.id, number: Number(target.pull.number) })
@@ -1370,6 +1390,8 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           <template v-else>
             <div v-if="pullLoadErrors.length" class="load-warning">部分项目 PR 加载失败：{{ pullLoadErrors.join('；') }}</div>
             <div v-if="selectedPull" class="automation-panel">
+              <button type="button" class="automation-summary-row" @click="automationPanelOpen = !automationPanelOpen"><span class="automation-toggle">{{ automationPanelOpen ? '▾' : '▸' }}</span><span class="automation-summary-text">{{ automationSummary }}</span></button>
+              <div v-show="automationPanelOpen">
               <div class="automation-row">
                 <span class="automation-label">AI 评审</span>
                 <template v-if="evaluatingPr || selectedPull.pull.state === 'ai_reviewing'"><span class="st-running-text">评审中…</span></template>
@@ -1392,6 +1414,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
                 <span class="automation-label">人工标记</span>
                 <button class="automation-action" :class="{ passed: reviewPassed }" :disabled="!selectedPull || selectedEnded || reviewPassed" @click="approveSelectedPull">{{ reviewPassed ? '✓ 审查已通过' : '标记审查通过' }}</button>
                 <button class="automation-action" :class="{ passed: testPassed }" :disabled="!selectedPull || selectedEnded || testPassed" @click="requestTestPassed">{{ testPassed ? '✓ 测试已通过' : '标记测试通过' }}</button>
+              </div>
               </div>
             </div>
             <div class="pr-workspace">

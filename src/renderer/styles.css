@@ -344,3 +344,7 @@ button:disabled { cursor: not-allowed; }
 .branch-chip { user-select: none; }
 .cancel-btn { padding: 9px 16px; border: 1px solid #d4a72c; border-radius: 7px; background: #fff8c5; color: #7d4e00; }
 .cancel-btn:hover:not(:disabled) { background: #fdf0b8; }
+.automation-summary-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 14px; border: 0; background: #f6f8fa; text-align: left; font-size: 13px; }
+.automation-summary-row:hover { background: #eef1f4; }
+.automation-toggle { flex: 0 0 auto; color: #57606a; font-size: 11px; }
+.automation-summary-text { color: #57606a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

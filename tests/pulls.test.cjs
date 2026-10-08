@@ -174,6 +174,9 @@ function check(name, cond) {
   // 选中 非 dock→dock 的 PR:显示一键 master
   await page.locator('.pr-item').first().click()
   await page.waitForTimeout(400)
+  check('折叠态显示摘要行', await page.locator('.automation-summary-row').isVisible())
+  await page.locator('.automation-summary-row').click()
+  await page.waitForTimeout(100)
   check('选中行高亮', (await page.locator('.pr-item.selected').count()) === 1)
   check('标题栏显示已选 PR', (await page.locator('.page-heading .selected-project-badge').textContent()) === 'proj-two' && (await page.locator('.page-heading .selected-pr-ref').textContent()).includes('#13'))
   check('标题栏项目徽章为紫色高亮', (await page.locator('.page-heading .selected-project-badge').evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(251, 239, 255)')
@@ -260,6 +263,8 @@ function check(name, cond) {
   // 普通 PR 两击合并(确认超时还原)
   await page.locator('.pr-item', { hasText: '#12' }).click()
   await page.waitForTimeout(400)
+  await page.locator('.automation-summary-row').click()
+  await page.waitForTimeout(100)
   check('自动化评审中时面板显示评审中', (await page.locator('.automation-row').first().textContent()).includes('评审中'))
   check('自动化评审中时手动按钮禁用', await page.locator('.automation-row').first().locator('button').first().isDisabled())
   const mergeBtn = page.locator('.merge-action')
@@ -280,6 +285,8 @@ function check(name, cond) {
   slowRefresh = true
   await page.locator('.pr-item', { hasText: '#16' }).click()
   await page.waitForTimeout(300)
+  await page.locator('.automation-summary-row').click().catch(() => { })
+  await page.waitForTimeout(100)
   await page.locator('.heading-actions button.one-click', { hasText: '一键部署' }).click()
   await page.locator('.heading-actions button.confirming').click()
   await page.waitForTimeout(400)
