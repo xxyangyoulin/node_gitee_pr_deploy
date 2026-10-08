@@ -1212,7 +1212,14 @@ function exitCommitView() {
 
 function copyPatch(file: any) {
   const content = patchText(file)
-  if (content) navigator.clipboard?.writeText(content)
+  if (!content) return
+  // 去掉 diff 标记:文件头(+++/---)、hunk(@@),并剥离行首 +/- 前缀
+  const clean = content
+    .split('\n')
+    .filter((line: string) => !line.startsWith('+++') && !line.startsWith('---') && !line.startsWith('@@'))
+    .map((line: string) => (line.startsWith('+') || line.startsWith('-') ? line.slice(1) : line.replace(/^ /, '')))
+    .join('\n')
+  navigator.clipboard?.writeText(clean)
 }
 
 const fullFileViews = ref<Record<string, boolean>>({})
