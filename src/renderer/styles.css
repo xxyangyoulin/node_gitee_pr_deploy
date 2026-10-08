@@ -342,3 +342,5 @@ button:disabled { cursor: not-allowed; }
 .md-body hr { border: 0; border-top: 1px solid #d8dee4; margin: 16px 0; }
 .copy-btn.md-toggle.active { color: #fff; background: #8250df; border-color: #8250df; }
 .branch-chip { user-select: none; }
+.cancel-btn { padding: 9px 16px; border: 1px solid #d4a72c; border-radius: 7px; background: #fff8c5; color: #7d4e00; }
+.cancel-btn:hover:not(:disabled) { background: #fdf0b8; }

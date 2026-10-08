@@ -274,14 +274,24 @@ type OneClickRun = {
   created2: boolean
   merged2: boolean
   deployed: boolean
+  deploying: boolean
   deployedTargetIds: number[]
   lastDeploy: { createdAt: string; success: number } | null
   deployTarget: { name: string; host: string; username: string; remotePath: string; command: string } | null
   log: string
   failed: boolean
   running: boolean
+  cancelled: boolean
 }
 const oneClickRun = ref<OneClickRun | null>(null)
+
+function cancelOneClick() {
+  const run = oneClickRun.value
+  if (!run || !run.running || run.cancelled) return
+  if (run.deploying) return // 部署执行中不可打断
+  run.cancelled = true
+  run.log += '\n[已取消:当前步骤完成后停止,已完成步骤保留]'
+}
 const modalLogEl = ref<HTMLElement | null>(null)
 
 const oneClickSteps = computed(() => {
@@ -988,11 +998,11 @@ function requestOneClick(kind: 'master' | 'deploy') {
   resetOneClickConfirm()
   if (kind === 'deploy' && !oneClickTarget.value && isDockToMaster.value) {
     const target = selectedPull.value!
-    oneClickRun.value = { project: target.project, pull: target.pull, title: '', created: null, withDeploy: true, direct: true, merged1: false, created2: false, merged2: false, deployed: false, deployedTargetIds: [] as number[], lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
+    oneClickRun.value = { project: target.project, pull: target.pull, title: '', created: null, withDeploy: true, direct: true, merged1: false, created2: false, merged2: false, deployed: false, deploying: false, deployedTargetIds: [] as number[], cancelled: false, lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
   } else {
     const target = oneClickTarget.value
     if (!target) return
-    oneClickRun.value = { project: target.project, pull: target.pull, title: String(target.pull.title ?? ''), created: null, withDeploy: kind === 'deploy', direct: false, merged1: false, created2: false, merged2: false, deployed: false, deployedTargetIds: [] as number[], lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
+    oneClickRun.value = { project: target.project, pull: target.pull, title: String(target.pull.title ?? ''), created: null, withDeploy: kind === 'deploy', direct: false, merged1: false, created2: false, merged2: false, deployed: false, deploying: false, deployedTargetIds: [] as number[], cancelled: false, lastDeploy: null, deployTarget: null, log: '', failed: false, running: false }
   }
   void runOneClick()
 }
@@ -1012,6 +1022,7 @@ async function findCreatedPull(project: Project, title: string) {
   // 创建后 Gitee 列表可能短暂不可见(最终一致性),且本地缓存需强制同步才会更新:
   // 每轮先触发服务端即时轮询再读缓存,重试 8 次 × 1s
   for (let attempt = 0; attempt < 8; attempt++) {
+    if (oneClickRun.value?.cancelled) throw new Error('已取消')
     await syncProjectPulls(project.id)
     const found = matchCreatedPull(project, title)
     if (found) return found
@@ -1037,17 +1048,22 @@ async function runDeployStage(run: OneClickRun) {
     .filter((row) => row.projectId === run.project.id && configComplete(row))
     .sort((a, b) => a.position - b.position || a.id - b.id)
   if (!targets.length) throw new Error(`项目 ${run.project.name} 未配置部署目标，无法执行部署`)
+  run.deploying = false
   for (const target of targets) {
     if (run.deployedTargetIds.includes(target.id)) continue
+    if (run.cancelled) throw new Error('已取消')
     run.deployTarget = { name: target.name || target.host, host: target.host, username: target.username, remotePath: target.remotePath, command: target.command }
     run.log += `\n==> [${target.name || target.host}] ${target.username}@${target.host}\n`
+    run.deploying = true
     try {
       await window.releaseConsole.runDeployment(target.id, (text) => {
         run.log += text
         nextTick(() => modalLogEl.value?.scrollTo({ top: modalLogEl.value.scrollHeight }))
       })
       run.deployedTargetIds.push(target.id)
+      run.deploying = false
     } catch (error) {
+      run.deploying = false
       const message = error instanceof Error ? error.message : '部署失败'
       run.log += `\n[部署失败] ${target.name || target.host}：${message}\n[后续目标已跳过，可重试继续]`
       throw new Error(`目标 [${target.name || target.host}] 部署失败`)
@@ -1065,6 +1081,7 @@ async function runOneClick() {
       await mergeFlow(run.project, run.pull)
       run.merged1 = true
     }
+    if (run.cancelled) throw new Error('已取消')
     if (!run.direct) {
       if (!run.created2) {
         const existing = await findCreatedPullQuiet(run.project, run.title)
@@ -1092,6 +1109,7 @@ async function runOneClick() {
       }
       run.merged2 = true
     }
+    if (run.cancelled) throw new Error('已取消')
     if (run.withDeploy && !run.deployed) {
       await runDeployStage(run)
       run.deployed = true
@@ -1103,7 +1121,7 @@ async function runOneClick() {
     run.failed = true
     const message = error instanceof Error ? error.message : '一键操作失败'
     mergeMessage.value = message
-    notifyDesktop(run.withDeploy ? '一键部署失败' : '一键合并失败', `${run.project.name}：${message}`)
+    if (message !== '已取消') notifyDesktop(run.withDeploy ? '一键部署失败' : '一键合并失败', `${run.project.name}：${message}`)
   } finally {
     run.running = false
     loadDeployHistory()
@@ -1576,7 +1594,7 @@ PR 描述:{{body}}
         <div v-if="oneClickRun.deployTarget" class="deploy-target-info">执行命令：<code class="deploy-command-line">ssh {{ oneClickRun.deployTarget.username }}@{{ oneClickRun.deployTarget.host }} 'cd {{ oneClickRun.deployTarget.remotePath }} && {{ oneClickRun.deployTarget.command }}'</code></div>
         <div v-if="oneClickRun.lastDeploy" class="deploy-target-info">上次部署：<code>{{ oneClickRun.lastDeploy.createdAt }}</code><span class="target-sep">·</span>结果：<code>{{ oneClickRun.lastDeploy.success ? '成功' : '失败' }}</code></div>
         <pre v-if="oneClickRun.withDeploy" ref="modalLogEl" class="deploy-output">{{ oneClickRun.log || '等待部署输出…' }}</pre>
-        <div class="modal-actions"><button v-if="oneClickRun.failed" class="primary" :disabled="oneClickRun.running" @click="runOneClick()">重试</button><button :disabled="oneClickRun.running" @click="oneClickRun = null">{{ oneClickRun.running ? '执行中…' : '关闭' }}</button></div>
+        <div class="modal-actions"><button v-if="oneClickRun.failed && !oneClickRun.running" class="primary" @click="runOneClick()">重试</button><button v-if="oneClickRun.running && !oneClickRun.deploying && !oneClickRun.cancelled" class="cancel-btn" @click="cancelOneClick">取消任务</button><button v-if="oneClickRun.running && oneClickRun.deploying" class="cancel-btn" disabled title="部署执行中,不可打断">部署中…</button><button :disabled="oneClickRun.running" @click="oneClickRun = null">{{ oneClickRun.running ? '执行中…' : '关闭' }}</button></div>
       </div>
     </div>
     <div v-if="confirmMessage" class="modal-backdrop" @click.self="cancelConfirmation"><div class="confirm-modal"><h3>请确认操作</h3><p>{{ confirmMessage }}</p><div class="modal-actions"><button @click="cancelConfirmation">取消</button><button class="primary" @click="acceptConfirmation">确认</button></div></div></div>

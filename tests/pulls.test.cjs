@@ -7,6 +7,7 @@ const PROJECTS = [
 const PRS_ONE = [{ number: 7, title: 'one feature', user: { login: 'alice' }, head: { ref: 'dock' }, base: { ref: 'master' }, created_at: '2026-09-20T10:30:00+08:00', state: 'open' }]
 const PRS_TWO = [
   { number: 13, title: 'chore deps', user: { login: 'dave' }, head: { ref: 'chore-x' }, base: { ref: 'dock' }, created_at: '2026-09-28T09:00:00+08:00' },
+  { number: 16, title: 'cancel case', user: { login: 'erin' }, head: { ref: 'cancel-x' }, base: { ref: 'dock' }, created_at: '2026-09-18T09:00:00+08:00' },
   { number: 12, title: 'two fix', user: { login: 'carol' }, head: { ref: 'fix-y' }, base: { ref: 'master' }, created_at: '2026-09-27T23:59:00+08:00' },
   { number: 11, title: 'two feature', user: { login: 'bob' }, head: { ref: 'feat-x' }, base: { ref: 'main' }, created_at: '2026-09-25T08:05:00+08:00' },
 ]
@@ -14,6 +15,7 @@ const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], eval
 const mergedNumbers = []
 let createdNumber = 13
 let merge14Failed = false
+let slowRefresh = false
 let target22Failed = false
 let projTwoPullsFail = false
 const deployLogs = [{ id: 1, projectId: 2, projectName: 'proj-two', targetName: 'PR#13 测试', kind: 'test', prNumber: 13, host: 'local', output: 'running...\n[测试通过]', aiSummary: '整体通过:全部用例成功。\n• 无失败项', success: 1, createdAt: '2026-09-30 12:00:00' }]
@@ -78,7 +80,9 @@ function check(name, cond) {
       return route.fulfill({ json: { verdict } })
     }
     if (path === '/api/pulls/refresh') {
-      saved.refreshes.push(req.postDataJSON().projectId ?? 0)
+      const payload = req.postDataJSON().projectId ?? 0
+      if (slowRefresh) return new Promise((resolve) => setTimeout(() => resolve(route.fulfill({ json: { results: [] } })), 900))
+      saved.refreshes.push(payload)
       if (projTwoPullsFail) return route.fulfill({ json: { results: [{ projectId: 2, name: 'proj-two', error: 'mock token 失效' }] } })
       return route.fulfill({ json: { results: [{ projectId: 1, name: 'proj-one', error: '' }, { projectId: 2, name: 'proj-two', error: '' }] } })
     }
@@ -127,9 +131,9 @@ function check(name, cond) {
   await page.goto(`${BASE_URL}/#/pulls`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(400)
 
-  check('PR 页聚合 4 个 PR(跨 2 个项目)', (await page.locator('.pr-item').count()) === 4)
+  check('PR 页聚合 5 个 PR(跨 2 个项目)', (await page.locator('.pr-item').count()) === 5)
   const badges = await page.locator('.pr-item .project-badge').allTextContents()
-  check('每个 PR 标注所属项目', JSON.stringify(badges) === JSON.stringify(['proj-two', 'proj-two', 'proj-two', 'proj-one']))
+  check('每个 PR 标注所属项目', JSON.stringify(badges) === JSON.stringify(['proj-two', 'proj-two', 'proj-two', 'proj-one', 'proj-two']))
   check('按创建时间倒序排列', (await page.locator('.pr-item strong').first().textContent()).includes('#13'))
   check('列表显示创建时间', (await page.locator('.pr-item').first().locator('.pr-time').textContent()) === '2026-09-28 09:00')
   await page.screenshot({ path: shot('pulls-aggregate.png') })
@@ -145,7 +149,7 @@ function check(name, cond) {
   await page.locator('.filter-select .dropdown-toggle').click()
   await page.locator('.dropdown-menu button', { hasText: 'proj-two' }).click()
   await page.waitForTimeout(100)
-  check('筛选后仅显示该项目 PR', (await page.locator('.pr-item').count()) === 3)
+  check('筛选后仅显示该项目 PR', (await page.locator('.pr-item').count()) === 4)
   await page.locator('.filter-select .dropdown-toggle').click()
   await page.locator('.dropdown-menu button', { hasText: '全部项目' }).click()
   await page.waitForTimeout(100)
@@ -158,14 +162,14 @@ function check(name, cond) {
   check('双击复制不触发行选中', (await page.locator('.pr-item.selected').count()) === selectedBefore)
 
   // 分组 tab:默认进行中(不含已结束),可切换已结束
-  check('默认进行中 tab 不含已结束 PR', (await page.locator('.pr-item', { hasText: '#5' }).count()) === 0 && (await page.locator('.pr-item').count()) === 4)
+  check('默认进行中 tab 不含已结束 PR', (await page.locator('.pr-item', { hasText: '#5' }).count()) === 0 && (await page.locator('.pr-item').count()) === 5)
   await page.locator('.pr-list-tabs button', { hasText: '已结束' }).click()
   await page.waitForTimeout(100)
   check('已结束 tab 展示历史 PR', (await page.locator('.pr-item').count()) === 3 && (await page.locator('.pr-item', { hasText: 'old feature' }).count()) === 1 && (await page.locator('.pr-item', { hasText: '#4' }).count()) === 1)
   check('已结束徽章标注', (await page.locator('.pr-item', { hasText: 'old feature' }).locator('.state-badge').textContent()) === '已合并')
   await page.locator('.pr-list-tabs button', { hasText: '进行中' }).click()
   await page.waitForTimeout(100)
-  check('切回进行中恢复', (await page.locator('.pr-item').count()) === 4)
+  check('切回进行中恢复', (await page.locator('.pr-item').count()) === 5)
 
   // 选中 非 dock→dock 的 PR:显示一键 master
   await page.locator('.pr-item').first().click()
@@ -271,6 +275,22 @@ function check(name, cond) {
   check('合并完成后强制同步该项目', saved.refreshes.at(-1) === 2)
 
   await page.screenshot({ path: shot('pulls-final.png') })
+
+  // 一键流程取消:发起后立即取消(非部署阶段可打断)
+  slowRefresh = true
+  await page.locator('.pr-item', { hasText: '#16' }).click()
+  await page.waitForTimeout(300)
+  await page.locator('.heading-actions button.one-click', { hasText: '一键部署' }).click()
+  await page.locator('.heading-actions button.confirming').click()
+  await page.waitForTimeout(400)
+  const cancelBtn = page.locator('.one-click-modal .cancel-btn', { hasText: '取消任务' })
+  check('运行中显示取消按钮', (await cancelBtn.count()) === 1)
+  await cancelBtn.click()
+  await page.waitForTimeout(1500)
+  check('取消后流程停止(失败态)', await page.locator('.one-click-modal button', { hasText: '重试' }).isVisible().catch(() => false))
+  slowRefresh = false
+  await page.locator('.one-click-modal button', { hasText: '关闭' }).click().catch(() => { })
+  await page.waitForTimeout(200)
 
   // 项目加载失败警告条
   projTwoPullsFail = true
