@@ -351,3 +351,6 @@ button:disabled { cursor: not-allowed; }
 .gitee-link { flex: 0 0 auto; margin-left: 4px; color: #0969da; font-size: 12px; text-decoration: none; }
 .gitee-link:hover { text-decoration: underline; }
 .conflict-chip { flex: 0 0 auto; padding: 1px 8px; border-radius: 10px; background: #ffebe9; border: 1px solid #cf222e; color: #cf222e; font-size: 11px; font-weight: 600; }
+.file-copy { flex: 0 0 auto; padding: 0 5px; border: 1px solid #d0d7de; border-radius: 4px; background: #fff; color: #57606a; font-size: 11px; opacity: 0; transition: opacity .1s; }
+.file-item:hover .file-copy { opacity: 1; }
+.file-copy:hover { color: #0969da; border-color: #0969da; }

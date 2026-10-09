@@ -100,6 +100,24 @@ function check(name, cond) {
   const sqlCard = page.locator('.file-card-header.sql-card', { hasText: 'migrate.sql' })
   check('文件卡片 SQL 浅黄底标注', (await sqlCard.count()) === 1 && (await sqlCard.evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(255, 248, 197)')
 
+  // 完整文件视图代码高亮
+  await page.locator('.file-card', { hasText: 'file1.ts' }).locator('.full-toggle').click()
+  await page.waitForTimeout(300)
+  const fullView = page.locator('.file-card', { hasText: 'file1.ts' }).locator('.full-file')
+  check('完整文件按行渲染', (await fullView.locator('.code-line').count()) > 0)
+  check('完整文件含加载内容', (await fullView.textContent()).includes('line1'))
+  await page.locator('.file-card', { hasText: 'file1.ts' }).locator('.full-toggle').click()
+  await page.waitForTimeout(200)
+
+  // hover 侧栏文件行显示复制文件名
+  const fileRow = page.locator('.file-item', { hasText: 'file1.ts' })
+  await fileRow.hover()
+  await page.waitForTimeout(150)
+  check('hover 显示复制文件名按钮', await fileRow.locator('.file-copy').isVisible())
+  await fileRow.locator('.file-copy').click()
+  await page.waitForTimeout(200)
+  check('复制文件名 toast', (await page.locator('.toast').textContent().catch(() => '')).includes('已复制文件名'))
+
   // Markdown 预览切换
   const mdCard = page.locator('.file-card', { hasText: 'README.md' })
   const mdBtn = mdCard.locator('.md-toggle')
