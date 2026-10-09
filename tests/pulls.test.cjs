@@ -11,7 +11,7 @@ const PRS_TWO = [
   { number: 12, title: 'two fix', user: { login: 'carol' }, head: { ref: 'fix-y' }, base: { ref: 'master' }, created_at: '2026-09-27T23:59:00+08:00' },
   { number: 11, title: 'two feature', user: { login: 'bob' }, head: { ref: 'feat-x' }, base: { ref: 'main' }, created_at: '2026-09-25T08:05:00+08:00' },
 ]
-const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [], testRuns: [], refreshes: [], draftToggles: [] }
+const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [], testRuns: [], refreshes: [], draftToggles: [], fileCalls: 0 }
 const mergedNumbers = []
 let createdNumber = 13
 let merge14Failed = false
@@ -196,6 +196,18 @@ function check(name, cond) {
 
   const oneClickBtn = page.locator('.heading-actions button', { hasText: '一键 master' })
   check('非 dock→dock 显示一键 master', (await oneClickBtn.count()) === 1)
+
+  // 内容缓存:重复选中同 PR 不再重复拉取文件
+  const filesCallsBefore = saved.fileCalls
+  await page.locator('.pr-item', { hasText: '#11' }).click()
+  await page.waitForTimeout(300)
+  await page.locator('.pr-item', { hasText: '#13' }).click()
+  await page.waitForTimeout(300)
+  await page.locator('.pr-item', { hasText: '#11' }).click()
+  await page.waitForTimeout(300)
+  check('缓存命中不重复拉取', saved.fileCalls === filesCallsBefore)
+  await page.locator('.pr-item', { hasText: '#13' }).click()
+  await page.waitForTimeout(300)
 
   // 发起测试
   const testBtn = page.locator('.automation-row').nth(1).locator('button', { hasText: '发起测试' })

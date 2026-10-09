@@ -292,6 +292,30 @@ function locateFirstSql() {
 const prDescription = ref('')
 const prDescriptionOpen = ref(false)
 const prFilesCache = ref<any[]>([])
+// PR 详情内容缓存:同 repo+PR+headSha 直接复用,head 变化才重新拉取
+type PrContentCache = { files: any[]; commits: any[]; logs: any[]; ts: number }
+const prContentCache = new Map<string, PrContentCache>()
+const PR_CACHE_TTL = 10 * 60 * 1000
+
+function prCacheKey(project: Project, pull: any) {
+  return `${project.repository}#${pull.number}@${pull.head?.sha ?? ''}`
+}
+
+function readPrCache(project: Project, pull: any) {
+  const key = prCacheKey(project, pull)
+  const hit = prContentCache.get(key)
+  if (hit && Date.now() - hit.ts < PR_CACHE_TTL) return hit
+  prContentCache.delete(key)
+  return null
+}
+
+function writePrCache(project: Project, pull: any, data: Omit<PrContentCache, 'ts'>) {
+  if (prContentCache.size > 50) {
+    const oldest = [...prContentCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0]
+    if (oldest) prContentCache.delete(oldest[0])
+  }
+  prContentCache.set(prCacheKey(project, pull), { ...data, ts: Date.now() })
+}
 const viewingCommit = ref<any | null>(null)
 const commitLoading = ref(false)
 const errorMessage = ref('')
@@ -980,21 +1004,29 @@ async function openPull(item: PullItem, seq: number) {
   try {
     const stale = () => seq !== selectionSeq || selectedPull.value !== item
     prDescription.value = String(pull.body ?? '').trim() || prDescription.value
-    const logs = await window.releaseConsole.pullRequestLogs({ repository: project.repository, token: project.token, number: Number(pull.number) })
-    if (stale()) return
-    const logText = (log: any) => `${log.content || ''} ${log.action_type || ''} ${log.after_change_value || ''}`.toLowerCase()
-    const positive = (log: any, kind: 'review' | 'test') => {
-      const text = logText(log)
-      const keyword = kind === 'review' ? /审查.*(通过|成功)|通过.*审查|review.*(pass|success)/ : /测试.*(通过|成功)|通过.*测试|test.*(pass|success)/
-      return keyword.test(text) && !/未通过|失败|拒绝|取消|not\s*pass|fail/.test(text)
+    const cached = readPrCache(project, pull)
+    let fileList: any[]
+    let commitList: any[]
+    if (cached) {
+      ;[fileList, commitList] = [cached.files, cached.commits]
+    } else {
+      const logs = await window.releaseConsole.pullRequestLogs({ repository: project.repository, token: project.token, number: Number(pull.number) })
+      if (stale()) return
+      const logText = (log: any) => `${log.content || ''} ${log.action_type || ''} ${log.after_change_value || ''}`.toLowerCase()
+      const positive = (log: any, kind: 'review' | 'test') => {
+        const text = logText(log)
+        const keyword = kind === 'review' ? /审查.*(通过|成功)|通过.*审查|review.*(pass|success)/ : /测试.*(通过|成功)|通过.*测试|test.*(pass|success)/
+        return keyword.test(text) && !/未通过|失败|拒绝|取消|not\s*pass|fail/.test(text)
+      }
+      reviewPassed.value = reviewPassed.value || logs.some((log: any) => positive(log, 'review'))
+      testPassed.value = testPassed.value || logs.some((log: any) => positive(log, 'test'))
+      ;[fileList, commitList] = await Promise.all([
+        window.releaseConsole.pullRequestFiles({ repository: project.repository, token: project.token, number: Number(pull.number) }),
+        window.releaseConsole.pullRequestCommits({ repository: project.repository, token: project.token, number: Number(pull.number) }).catch(() => []),
+      ])
+      if (stale()) return
+      writePrCache(project, pull, { files: fileList, commits: commitList, logs })
     }
-    reviewPassed.value = reviewPassed.value || logs.some((log: any) => positive(log, 'review'))
-    testPassed.value = testPassed.value || logs.some((log: any) => positive(log, 'test'))
-    const [fileList, commitList] = await Promise.all([
-      window.releaseConsole.pullRequestFiles({ repository: project.repository, token: project.token, number: Number(pull.number) }),
-      window.releaseConsole.pullRequestCommits({ repository: project.repository, token: project.token, number: Number(pull.number) }).catch(() => []),
-    ])
-    if (stale()) return
     files.value = fileList
     prFilesCache.value = fileList
     commits.value = commitList
