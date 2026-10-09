@@ -348,3 +348,6 @@ button:disabled { cursor: not-allowed; }
 .automation-summary-row:hover { background: #eef1f4; }
 .automation-toggle { flex: 0 0 auto; color: #57606a; font-size: 11px; }
 .automation-summary-text { color: #57606a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gitee-link { flex: 0 0 auto; margin-left: 4px; color: #0969da; font-size: 12px; text-decoration: none; }
+.gitee-link:hover { text-decoration: underline; }
+.conflict-chip { flex: 0 0 auto; padding: 1px 8px; border-radius: 10px; background: #ffebe9; border: 1px solid #cf222e; color: #cf222e; font-size: 11px; font-weight: 600; }

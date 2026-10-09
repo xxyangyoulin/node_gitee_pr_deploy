@@ -15,7 +15,7 @@ interface Window {
     listDeploymentServers(): Promise<Array<{ host: string; username: string }>>
     listDeploymentLogs(query?: { projectId?: number; limit?: number }): Promise<Array<{ id: number; projectId: number; projectName: string; targetName: string; kind: string; prNumber: number; host: string; output: string; aiSummary: string; success: number; createdAt: string }>>
     listPullRequests(input: { repository: string; token: string }): Promise<any[]>
-    cachedPulls(query?: { projectId?: number }): Promise<Array<{ projectId: number; projectName: string; repository: string; token: string; number: number; title: string; body: string; author: string; headRef: string; baseRef: string; headSha: string; state: string; statusNote: string; aiResult: string; aiEvaluatedAt: string; createdAt: string; updatedAt: string }>>
+    cachedPulls(query?: { projectId?: number }): Promise<Array<{ projectId: number; projectName: string; repository: string; token: string; number: number; title: string; body: string; author: string; headRef: string; baseRef: string; headSha: string; state: string; statusNote: string; aiResult: string; aiEvaluatedAt: string; mergeable: number; createdAt: string; updatedAt: string }>>
     refreshPulls(projectId?: number): Promise<{ results: Array<{ projectId: number; name: string; error: string }> }>
     syncStatus(): Promise<Array<{ projectId: number; name: string; lastSyncAt: string; lastError: string; enabled: number }>>
     testAiConnection(input: { aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string }): Promise<{ message: string }>

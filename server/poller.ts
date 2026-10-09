@@ -31,6 +31,7 @@ export async function pollProject(database: DatabaseSync, project: Project) {
     seen.add(number)
     const giteeState = pull.state === 'open' ? 'open' : (pull.merged ? 'merged' : 'closed')
     const existing = database.prepare('SELECT id, head_sha AS headSha, state FROM pr_cache WHERE project_id=? AND number=?').get(project.id, number) as any
+    const mergeable = typeof pull.mergeable === 'boolean' ? (pull.mergeable ? 1 : 0) : -1
     const columns = {
       title: String(pull.title ?? ''),
       body: String(pull.body ?? ''),
@@ -44,9 +45,9 @@ export async function pollProject(database: DatabaseSync, project: Project) {
     }
     if (!existing) {
       const initialState = giteeState !== 'open' ? giteeState : 'new'
-      database.prepare(`INSERT INTO pr_cache(project_id,number,title,body,author,head_ref,base_ref,head_sha,raw,gitee_created_at,gitee_updated_at,first_seen_at,last_seen_at,synced_at,state,status_note)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(project.id, number, columns.title, columns.body, columns.author, columns.head_ref, columns.base_ref, columns.head_sha, columns.raw, columns.gitee_created_at, columns.gitee_updated_at, syncedAt, syncedAt, syncedAt, initialState, '')
+      database.prepare(`INSERT INTO pr_cache(project_id,number,title,body,author,head_ref,base_ref,head_sha,raw,gitee_created_at,gitee_updated_at,first_seen_at,last_seen_at,synced_at,state,status_note,mergeable)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(project.id, number, columns.title, columns.body, columns.author, columns.head_ref, columns.base_ref, columns.head_sha, columns.raw, columns.gitee_created_at, columns.gitee_updated_at, syncedAt, syncedAt, syncedAt, initialState, '', mergeable)
       if (giteeState === 'open') changed += 1
     } else {
       let state = existing.state
@@ -59,8 +60,8 @@ export async function pollProject(database: DatabaseSync, project: Project) {
         changed += 1
       }
       if (state !== 'new' && state !== 'merged' && state !== 'closed' && giteeState === 'open') state = existing.state
-      database.prepare(`UPDATE pr_cache SET title=?,body=?,author=?,head_ref=?,base_ref=?,head_sha=?,state=?,status_note=?,raw=?,gitee_updated_at=?,last_seen_at=?,synced_at=? WHERE id=?`)
-        .run(columns.title, columns.body, columns.author, columns.head_ref, columns.base_ref, columns.head_sha, state, statusNote, columns.raw, columns.gitee_updated_at, syncedAt, syncedAt, existing.id)
+      database.prepare(`UPDATE pr_cache SET title=?,body=?,author=?,head_ref=?,base_ref=?,head_sha=?,state=?,status_note=?,raw=?,gitee_updated_at=?,last_seen_at=?,synced_at=?,mergeable=? WHERE id=?`)
+        .run(columns.title, columns.body, columns.author, columns.head_ref, columns.base_ref, columns.head_sha, state, statusNote, columns.raw, columns.gitee_updated_at, syncedAt, syncedAt, mergeable, existing.id)
     }
   }
   // 缓存中仍为开放态、但列表中不存在的 PR:查详情确认最终状态

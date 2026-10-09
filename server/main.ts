@@ -27,6 +27,7 @@ try { database.exec('ALTER TABLE deployment_logs ADD COLUMN kind TEXT NOT NULL D
 try { database.exec('ALTER TABLE deployment_logs ADD COLUMN pr_number INTEGER NOT NULL DEFAULT 0') } catch { }
 try { database.exec('ALTER TABLE deployment_logs ADD COLUMN ai_summary TEXT NOT NULL DEFAULT ""') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_result TEXT NOT NULL DEFAULT ""') } catch { }
+try { database.exec('ALTER TABLE pr_cache ADD COLUMN mergeable INTEGER NOT NULL DEFAULT -1') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_evaluated_at TEXT NOT NULL DEFAULT ""') } catch { }
 database.exec("UPDATE pr_cache SET state='needs_test', status_note='服务重启,测试中断,可重新发起' WHERE state='testing'")
 database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL DEFAULT 0, project_name TEXT NOT NULL DEFAULT "", endpoint TEXT NOT NULL DEFAULT "", method TEXT NOT NULL DEFAULT "GET", ok INTEGER NOT NULL DEFAULT 1, status INTEGER NOT NULL DEFAULT 0, error_message TEXT NOT NULL DEFAULT "", duration_ms INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
@@ -153,6 +154,7 @@ async function api(request: import('node:http').IncomingMessage, response: impor
       statusNote: row.status_note,
       aiResult: row.ai_result,
       aiEvaluatedAt: row.ai_evaluated_at,
+      mergeable: row.mergeable,
       createdAt: row.gitee_created_at,
       updatedAt: row.gitee_updated_at,
     })))

@@ -55,6 +55,7 @@ function check(name, cond) {
           headRef: pull.head?.ref || '',
           baseRef: pull.base?.ref || '',
           headSha: pull.head?.sha || '',
+          mergeable: pull.number === 13 ? 0 : 1,
           state: (pull.state ?? 'open') === 'open' ? (pull.number === 13 ? 'needs_test' : pull.number === 12 ? 'ai_reviewing' : 'new') : (pull.state || 'new'),
           statusNote: pull.number === 13 ? '包含 SQL 变更' : '',
           aiResult: pull.number === 13 ? JSON.stringify({ needs_test: true, reason: '包含 SQL 变更', risk_level: 'high' }) : '',
@@ -177,6 +178,9 @@ function check(name, cond) {
   check('折叠态显示摘要行', await page.locator('.automation-summary-row').isVisible())
   await page.locator('.automation-summary-row').click()
   await page.waitForTimeout(100)
+  check('Gitee 跳转链接存在', (await page.locator('.pr-item').first().locator('.gitee-link').getAttribute('href')) === 'https://gitee.com/owner/proj-two/pulls/13')
+  check('冲突 PR 显示冲突标记', (await page.locator('.pr-item', { hasText: '#13' }).locator('.conflict-chip').count()) === 1)
+  check('无冲突 PR 不显示标记', (await page.locator('.pr-item', { hasText: '#12' }).locator('.conflict-chip').count()) === 0)
   check('选中行高亮', (await page.locator('.pr-item.selected').count()) === 1)
   check('标题栏显示已选 PR', (await page.locator('.page-heading .selected-project-badge').textContent()) === 'proj-two' && (await page.locator('.page-heading .selected-pr-ref').textContent()).includes('#13'))
   check('标题栏项目徽章为紫色高亮', (await page.locator('.page-heading .selected-project-badge').evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(251, 239, 255)')
