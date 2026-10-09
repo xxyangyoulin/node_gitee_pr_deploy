@@ -7,7 +7,7 @@ const PROJECTS = [
 const PRS_ONE = [{ number: 7, title: 'one feature', user: { login: 'alice' }, head: { ref: 'dock' }, base: { ref: 'master' }, created_at: '2026-09-20T10:30:00+08:00', state: 'open' }]
 const PRS_TWO = [
   { number: 13, title: 'chore deps', user: { login: 'dave' }, head: { ref: 'chore-x' }, base: { ref: 'dock' }, created_at: '2026-09-28T09:00:00+08:00' },
-  { number: 16, title: 'cancel case', user: { login: 'erin' }, head: { ref: 'cancel-x' }, base: { ref: 'dock' }, created_at: '2026-09-18T09:00:00+08:00' },
+  { number: 16, title: 'cancel case — 这是一个非常长的 PR 标题用于验证列表完整展示不省略功能是否正常工作的测试用例标题', user: { login: 'erin' }, head: { ref: 'cancel-x' }, base: { ref: 'dock' }, created_at: '2026-09-18T09:00:00+08:00' },
   { number: 12, title: 'two fix', user: { login: 'carol' }, head: { ref: 'fix-y' }, base: { ref: 'master' }, created_at: '2026-09-27T23:59:00+08:00' },
   { number: 11, title: 'two feature', user: { login: 'bob' }, head: { ref: 'feat-x' }, base: { ref: 'main' }, created_at: '2026-09-25T08:05:00+08:00' },
 ]
@@ -294,6 +294,13 @@ function check(name, cond) {
   check('合并完成后强制同步该项目', saved.refreshes.at(-1) === 2)
 
   await page.screenshot({ path: shot('pulls-final.png') })
+
+  // 长标题完整显示
+  const longTitle = page.locator('.pr-item', { hasText: '#16' }).locator('.pr-title-row strong')
+  const longText = await longTitle.textContent()
+  check('长标题全文渲染', longText.includes('测试用例标题'))
+  const clipped = await longTitle.evaluate((el) => el.scrollWidth > el.clientWidth + 1)
+  check('长标题未被裁切省略', !clipped)
 
   // 一键流程取消:发起后立即取消(非部署阶段可打断)
   slowRefresh = true
