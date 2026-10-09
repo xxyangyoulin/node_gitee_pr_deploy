@@ -274,7 +274,9 @@ function check(name, cond) {
     await page.locator('.automation-summary-row').click()
     await page.waitForTimeout(100)
   }
-  await page.locator('.automation-row', { hasText: '草稿' }).locator('button', { hasText: '转为正式 PR' }).click()
+  const draftEntry = page.locator('.summary-draft-toggle')
+  check('摘要行显示草稿切换入口', (await draftEntry.textContent()).includes('草稿中'))
+  await draftEntry.click()
   await page.waitForTimeout(300)
   check('切换草稿请求发出', saved.draftToggles.at(-1)?.number === 12 && saved.draftToggles.at(-1)?.draft === false)
   check('自动化评审中时面板显示评审中', (await page.locator('.automation-row').first().textContent()).includes('评审中'))
