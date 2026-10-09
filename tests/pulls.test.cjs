@@ -11,7 +11,7 @@ const PRS_TWO = [
   { number: 12, title: 'two fix', user: { login: 'carol' }, head: { ref: 'fix-y' }, base: { ref: 'master' }, created_at: '2026-09-27T23:59:00+08:00' },
   { number: 11, title: 'two feature', user: { login: 'bob' }, head: { ref: 'feat-x' }, base: { ref: 'main' }, created_at: '2026-09-25T08:05:00+08:00' },
 ]
-const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [], testRuns: [], refreshes: [] }
+const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [], testRuns: [], refreshes: [], draftToggles: [] }
 const mergedNumbers = []
 let createdNumber = 13
 let merge14Failed = false
@@ -56,6 +56,7 @@ function check(name, cond) {
           baseRef: pull.base?.ref || '',
           headSha: pull.head?.sha || '',
           mergeable: pull.number === 13 ? 0 : 1,
+          draft: pull.number === 12 ? 1 : 0,
           state: (pull.state ?? 'open') === 'open' ? (pull.number === 13 ? 'needs_test' : pull.number === 12 ? 'ai_reviewing' : 'new') : (pull.state || 'new'),
           statusNote: pull.number === 13 ? '包含 SQL 变更' : '',
           aiResult: pull.number === 13 ? JSON.stringify({ needs_test: true, reason: '包含 SQL 变更', risk_level: 'high' }) : '',
@@ -65,6 +66,7 @@ function check(name, cond) {
         }]
       }) })
     }
+    if (path === '/api/gitee/toggle-draft') { saved.draftToggles.push(req.postDataJSON()); return route.fulfill({ json: {} }) }
     if (path === '/api/test/configs') return route.fulfill({ json: [{ project_id: 2, server_mode: 'ssh', host: 'a.com', username: 'deploy', workdir_template: '~/TEST/{project}_{pr}', commands: '[{"label":"全量","command":"vendor/bin/phpunit tests"}]', ai_decides: 0, ai_prompt: '', timeout_sec: 600, projectName: 'proj-two' }] })
     if (path === '/api/test/run') { saved.testRuns.push(req.postDataJSON()); deployLogs.unshift({ id: deployLogs.length + 1, projectId: 2, projectName: 'proj-two', targetName: 'PR#13 测试', kind: 'test', prNumber: 13, host: 'local', output: 'running...\n[测试通过]', aiSummary: '整体通过:全部用例成功。\n• 无失败项', success: 1, createdAt: '2026-09-30 13:00:00' }); return route.fulfill({ json: 'running...\n[测试通过]' }) }
     if (path === '/api/deployment/run') {
@@ -180,6 +182,7 @@ function check(name, cond) {
   await page.waitForTimeout(100)
   check('Gitee 跳转链接存在', (await page.locator('.pr-item').first().locator('.gitee-link').getAttribute('href')) === 'https://gitee.com/owner/proj-two/pulls/13')
   check('冲突 PR 显示冲突标记', (await page.locator('.pr-item', { hasText: '#13' }).locator('.conflict-chip').count()) === 1)
+  check('草稿 PR 显示草稿标记', (await page.locator('.pr-item', { hasText: '#12' }).locator('.draft-chip').count()) === 1)
   check('无冲突 PR 不显示标记', (await page.locator('.pr-item', { hasText: '#12' }).locator('.conflict-chip').count()) === 0)
   check('选中行高亮', (await page.locator('.pr-item.selected').count()) === 1)
   check('标题栏显示已选 PR', (await page.locator('.page-heading .selected-project-badge').textContent()) === 'proj-two' && (await page.locator('.page-heading .selected-pr-ref').textContent()).includes('#13'))
@@ -188,7 +191,7 @@ function check(name, cond) {
   check('自动化面板 AI 行展示结论', (await aiRow.textContent()).includes('需要测试') && (await aiRow.textContent()).includes('包含 SQL 变更'))
   check('高风险结论红色徽章', (await aiRow.locator('.verdict-chip').evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(255, 235, 233)')
   check('测试行显示未执行', (await page.locator('.automation-row').nth(1).textContent()).includes('未执行'))
-  check('人工标记按钮在面板', (await page.locator('.automation-row').nth(2).locator('button').count()) === 2)
+  check('人工标记按钮在面板', (await page.locator('.automation-row').nth(3).locator('button').count()) === 2)
   check('待测试徽章显示', (await page.locator('.pr-item.selected .state-badge').textContent()) === '待测试')
 
   const oneClickBtn = page.locator('.heading-actions button', { hasText: '一键 master' })
@@ -269,6 +272,9 @@ function check(name, cond) {
   await page.waitForTimeout(400)
   await page.locator('.automation-summary-row').click()
   await page.waitForTimeout(100)
+  await page.locator('.automation-row', { hasText: '草稿' }).locator('button', { hasText: '转为正式 PR' }).click()
+  await page.waitForTimeout(300)
+  check('切换草稿请求发出', saved.draftToggles.at(-1)?.number === 12 && saved.draftToggles.at(-1)?.draft === false)
   check('自动化评审中时面板显示评审中', (await page.locator('.automation-row').first().textContent()).includes('评审中'))
   check('自动化评审中时手动按钮禁用', await page.locator('.automation-row').first().locator('button').first().isDisabled())
   const mergeBtn = page.locator('.merge-action')

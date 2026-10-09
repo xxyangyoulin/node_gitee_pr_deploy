@@ -102,6 +102,7 @@ window.releaseConsole = {
   repositoryFile: (input) => request('/api/gitee/file', { method: 'POST', body: JSON.stringify(input) }),
   createPullRequest: (input) => request('/api/gitee/create-pull', { method: 'POST', body: JSON.stringify(input) }),
   mergePullRequest: (input) => request('/api/gitee/merge-pull', { method: 'POST', body: JSON.stringify(input) }),
+  togglePrDraft: (input) => request('/api/gitee/toggle-draft', { method: 'POST', body: JSON.stringify(input) }),
 }
 
 createApp(App).mount('#app')

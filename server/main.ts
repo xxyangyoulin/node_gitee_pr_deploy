@@ -28,6 +28,7 @@ try { database.exec('ALTER TABLE deployment_logs ADD COLUMN pr_number INTEGER NO
 try { database.exec('ALTER TABLE deployment_logs ADD COLUMN ai_summary TEXT NOT NULL DEFAULT ""') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_result TEXT NOT NULL DEFAULT ""') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN mergeable INTEGER NOT NULL DEFAULT -1') } catch { }
+try { database.exec('ALTER TABLE pr_cache ADD COLUMN draft INTEGER NOT NULL DEFAULT 0') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_evaluated_at TEXT NOT NULL DEFAULT ""') } catch { }
 database.exec("UPDATE pr_cache SET state='needs_test', status_note='服务重启,测试中断,可重新发起' WHERE state='testing'")
 database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL DEFAULT 0, project_name TEXT NOT NULL DEFAULT "", endpoint TEXT NOT NULL DEFAULT "", method TEXT NOT NULL DEFAULT "GET", ok INTEGER NOT NULL DEFAULT 1, status INTEGER NOT NULL DEFAULT 0, error_message TEXT NOT NULL DEFAULT "", duration_ms INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
@@ -155,6 +156,7 @@ async function api(request: import('node:http').IncomingMessage, response: impor
       aiResult: row.ai_result,
       aiEvaluatedAt: row.ai_evaluated_at,
       mergeable: row.mergeable,
+      draft: row.draft,
       createdAt: row.gitee_created_at,
       updatedAt: row.gitee_updated_at,
     })))
@@ -253,6 +255,10 @@ async function api(request: import('node:http').IncomingMessage, response: impor
   if (request.method === 'POST' && path === '/api/gitee/test-pull') return json(response, 200, await gitee(input, `pulls/${input.number}/test`, { method: 'POST', body: new URLSearchParams({ force: 'true' }) }))
   if (request.method === 'POST' && path === '/api/gitee/file') return json(response, 200, await gitee(input, `contents/${input.path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(input.ref)}`))
   if (request.method === 'POST' && path === '/api/gitee/create-pull') return json(response, 200, await gitee(input, 'pulls', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: input.title, head: input.head, base: input.base }) }))
+  if (request.method === 'POST' && path === '/api/gitee/toggle-draft') {
+    const result = await gitee(input, `pulls/${input.number}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ draft: !!input.draft }) })
+    return json(response, 200, result)
+  }
   if (request.method === 'POST' && path === '/api/gitee/merge-pull') { const mergeMethod = ['merge', 'rebase', 'squash'].includes(input.mergeMethod) ? input.mergeMethod : 'merge'; return json(response, 200, await gitee(input, `pulls/${input.number}/merge`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ merge_method: mergeMethod }) })) }
   return json(response, 404, { message: 'Not found' })
 }
