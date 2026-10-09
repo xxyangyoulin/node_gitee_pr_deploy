@@ -270,8 +270,10 @@ function check(name, cond) {
   // 普通 PR 两击合并(确认超时还原)
   await page.locator('.pr-item', { hasText: '#12' }).click()
   await page.waitForTimeout(400)
-  await page.locator('.automation-summary-row').click()
-  await page.waitForTimeout(100)
+  if (!(await page.locator('.automation-row').first().isVisible().catch(() => false))) {
+    await page.locator('.automation-summary-row').click()
+    await page.waitForTimeout(100)
+  }
   await page.locator('.automation-row', { hasText: '草稿' }).locator('button', { hasText: '转为正式 PR' }).click()
   await page.waitForTimeout(300)
   check('切换草稿请求发出', saved.draftToggles.at(-1)?.number === 12 && saved.draftToggles.at(-1)?.draft === false)
