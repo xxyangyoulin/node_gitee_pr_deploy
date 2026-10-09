@@ -1174,7 +1174,9 @@ async function runOneClick() {
     }
     mergeMessage.value = run.withDeploy ? '一键部署完成' : '一键合并完成'
     if (run.withDeploy) notifyDesktop('一键部署完成', `${run.project.name} 全流程成功`)
-    await syncProjectPulls(run.project.id)
+    run.running = false // 先解除弹窗锁定,同步在后台进行
+    void syncProjectPulls(run.project.id)
+    return
   } catch (error) {
     run.failed = true
     let message = error instanceof Error ? error.message : '一键操作失败'
