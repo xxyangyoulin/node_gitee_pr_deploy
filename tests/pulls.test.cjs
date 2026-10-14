@@ -342,6 +342,19 @@ function check(name, cond) {
   await page.waitForTimeout(500)
   check('恢复后警告条消失', (await page.locator('.load-warning').count()) === 0)
 
+  // 项目下拉内直发部署
+  const runsBefore = saved.runs.length
+  await page.locator('.filter-select .dropdown-toggle').click()
+  const deployAction = page.locator('.dropdown-option', { hasText: 'proj-one' }).locator('.dropdown-option-action')
+  check('下拉项目行含部署按钮', (await deployAction.count()) === 1)
+  await deployAction.click()
+  await page.waitForTimeout(600)
+  check('点击后跳转部署页', new URL(page.url()).hash === '#/deployments')
+  check('部署请求已发出(项目 1 目标 11)', saved.runs[saved.runs.length - 1] === 11)
+  void runsBefore
+  await page.goto(`${BASE_URL}/#/pulls`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(400)
+
   await browser.close()
   console.log(failures ? `\n${failures} failed` : '\nALL PASS')
   process.exit(failures ? 1 : 0)

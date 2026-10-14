@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
+export type DropdownOption = { value: string | number; label: string; actionLabel?: string; onAction?: () => void }
+
 const props = defineProps<{
   modelValue: string | number
-  options: Array<{ value: string | number; label: string }>
+  options: DropdownOption[]
   disabled?: boolean
 }>()
 const emit = defineEmits<{ (e: 'update:modelValue', value: string | number): void }>()
@@ -27,6 +29,11 @@ function onScrollCapture(event: Event) {
 function choose(value: string | number) {
   emit('update:modelValue', value)
   open.value = false
+}
+
+function runAction(option: DropdownOption) {
+  open.value = false
+  option.onAction?.()
 }
 
 watch(open, (value) => {
@@ -55,7 +62,7 @@ onBeforeUnmount(() => {
       <span class="dropdown-arrow">▾</span>
     </button>
     <div v-if="open" class="dropdown-menu">
-      <button v-for="option in options" :key="option.value" type="button" :class="{ active: option.value === modelValue }" @click="choose(option.value)">{{ option.label }}</button>
+      <div v-for="option in options" :key="option.value" :class="['dropdown-option', { active: option.value === modelValue }]"><button type="button" class="dropdown-option-label" @click="choose(option.value)">{{ option.label }}</button><button v-if="option.actionLabel && option.onAction" type="button" class="dropdown-option-action" @click.stop="runAction(option)">{{ option.actionLabel }}</button></div>
     </div>
   </span>
 </template>
