@@ -22,11 +22,6 @@ function buildPrMergedCard(input: { project: string; repository: string; number:
             content: `**${input.title}**  ·  \`${input.repository}#${input.number}\`\n分支:${input.branchText}\n提交人:<font color='green'>**${input.author}**</font>,你的 PR 已自动合并并成功部署 🎉`,
           },
         },
-        { tag: 'hr' },
-        {
-          tag: 'div',
-          text: { tag: 'lark_md', content: `**部署目标(${input.targets.length})**\n${input.targets.map((target) => `• ${target}`).join('\n')}` },
-        },
         {
           tag: 'note',
           elements: [{ tag: 'plain_text', content: `项目:${input.project} · 部署时间:${input.deployTime}` }],
