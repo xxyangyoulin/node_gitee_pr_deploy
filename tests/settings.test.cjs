@@ -5,7 +5,7 @@ const PROJECTS = [
   { id: 2, name: 'proj-two', repository: 'owner/proj-two', token: 'tok2', openPrs: 0 },
 ]
 const SETTINGS = { prHead: 'feat', prBase: 'stable', mergeMethod: 'rebase' }
-const saved = { settings: [], updates: [], merges: [], creates: [], deletes: [] }
+const saved = { settings: [], updates: [], merges: [], creates: [], deletes: [], mappings: [] }
 let failures = 0
 
 function check(name, cond) {
@@ -25,6 +25,8 @@ function check(name, cond) {
     if (path === '/api/settings' && req.method() === 'GET') return route.fulfill({ json: { ...SETTINGS, aiBaseUrl: 'https://ai.example/v1', aiApiKey: '', aiModel: '', aiPrompt: '' } })
     if (path === '/api/ai/test' && req.method() === 'POST') { const input = req.postDataJSON(); if (!input.aiApiKey) return route.fulfill({ status: 400, json: { message: '请先完整配置模型' } }); return route.fulfill({ json: { message: '连接成功:ok' } }) }
     if (path === '/api/settings' && req.method() === 'POST') { saved.settings.push(req.postDataJSON()); return route.fulfill({ json: req.postDataJSON() }) }
+    if (path === '/api/user-mappings' && req.method() === 'GET') return route.fulfill({ json: [{ giteeLogin: 'alice', feishuId: 'ou_123', feishuName: '爱丽丝' }] })
+    if (path === '/api/user-mappings' && req.method() === 'POST') { saved.mappings.push(req.postDataJSON()); return route.fulfill({ json: req.postDataJSON() }) }
     if (path === '/api/projects/update') { const input = req.postDataJSON(); saved.updates.push(input); return route.fulfill({ json: { id: input.id, name: input.name, repository: input.repository, token: input.token || 'kept', openPrs: 0 } }) }
     if (path === '/api/meta') return route.fulfill({ json: { version: '9.9.9', dataPath: '/tmp/fake/release-console.sqlite' } })
     if (path === '/api/pulls') {
@@ -55,6 +57,19 @@ function check(name, cond) {
   check('head 预填 feat', (await page.locator('.settings-section input').first().inputValue()) === 'feat')
   check('base 预填 stable', (await page.locator('.settings-section input').nth(1).inputValue()) === 'stable')
   check('合并方式预填 rebase', (await page.locator('.settings-section .dropdown-toggle').first().textContent()).includes('rebase'))
+
+  // 用户映射页签
+  await page.locator('.settings-tabs button', { hasText: '用户映射' }).click()
+  await page.waitForTimeout(200)
+  check('映射列表展示已有映射', (await page.locator('.project-row', { hasText: 'alice' }).count()) === 1)
+  await page.locator('.mapping-form input').nth(0).fill('bob')
+  await page.locator('.mapping-form input').nth(1).fill('ou_456')
+  await page.locator('.mapping-form input').nth(2).fill('小波')
+  await page.locator('.mapping-form button[type=submit]').click()
+  await page.waitForTimeout(200)
+  check('保存映射请求发出', saved.mappings.at(-1)?.giteeLogin === 'bob' && saved.mappings.at(-1)?.feishuId === 'ou_456')
+
+  // 项目管理
   await page.locator('.settings-tabs button', { hasText: '项目管理' }).click()
   await page.waitForTimeout(100)
   check('项目管理列出 2 个项目', (await page.locator('.project-row').count()) === 2)

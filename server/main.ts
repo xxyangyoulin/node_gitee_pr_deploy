@@ -31,6 +31,7 @@ try { database.exec('ALTER TABLE pr_cache ADD COLUMN mergeable INTEGER NOT NULL 
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN draft INTEGER NOT NULL DEFAULT 0') } catch { }
 try { database.exec('ALTER TABLE pr_cache ADD COLUMN ai_evaluated_at TEXT NOT NULL DEFAULT ""') } catch { }
 database.exec("UPDATE pr_cache SET state='needs_test', status_note='服务重启,测试中断,可重新发起' WHERE state='testing'")
+database.exec('CREATE TABLE IF NOT EXISTS user_mapping (gitee_login TEXT PRIMARY KEY, feishu_id TEXT NOT NULL DEFAULT "", feishu_name TEXT NOT NULL DEFAULT "")')
 database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL DEFAULT 0, project_name TEXT NOT NULL DEFAULT "", endpoint TEXT NOT NULL DEFAULT "", method TEXT NOT NULL DEFAULT "GET", ok INTEGER NOT NULL DEFAULT 1, status INTEGER NOT NULL DEFAULT 0, error_message TEXT NOT NULL DEFAULT "", duration_ms INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT "")')
 {
   const targetCount = (database.prepare('SELECT COUNT(*) AS c FROM deploy_targets').get() as any).c
@@ -48,6 +49,7 @@ database.exec('CREATE TABLE IF NOT EXISTS request_logs (id INTEGER PRIMARY KEY A
 
 import { setGiteeLogger } from './gitee.js'
 import { testModelConnection, summarizeTestRun } from './ai.js'
+import { notifyPrMerged, sendFeishuTest } from './notify.js'
 import { homedir } from 'node:os'
 import { runTest, type TestConfig } from './tester.js'
 {
@@ -64,7 +66,7 @@ import { runTest, type TestConfig } from './tester.js'
   })
 }
 
-const defaultSettings: Record<string, string> = { prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0', aiBaseUrl: '', aiApiKey: '', aiModel: '', aiPrompt: '' }
+const defaultSettings: Record<string, string> = { prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0', aiBaseUrl: '', aiApiKey: '', aiModel: '', aiPrompt: '', feishuWebhook: '' }
 
 function readSettings() {
   const rows = database.prepare('SELECT key,value FROM settings').all() as Array<{ key: string; value: string }>
@@ -204,6 +206,22 @@ async function api(request: import('node:http').IncomingMessage, response: impor
       response.end()
     })
     return
+  }
+  if (path === '/api/user-mappings' && request.method === 'GET') return json(response, 200, database.prepare('SELECT gitee_login AS giteeLogin, feishu_id AS feishuId, feishu_name AS feishuName FROM user_mapping ORDER BY gitee_login').all())
+  if (path === '/api/user-mappings' && request.method === 'POST') {
+    if (!input.giteeLogin?.trim() || !input.feishuId?.trim()) return json(response, 400, { message: 'Gitee 用户名与飞书 ID 不能为空' })
+    database.prepare('INSERT INTO user_mapping(gitee_login,feishu_id,feishu_name) VALUES(?,?,?) ON CONFLICT(gitee_login) DO UPDATE SET feishu_id=excluded.feishu_id,feishu_name=excluded.feishu_name')
+      .run(String(input.giteeLogin).trim(), String(input.feishuId).trim(), String(input.feishuName ?? '').trim())
+    return json(response, 200, input)
+  }
+  if (path === '/api/user-mappings/delete' && request.method === 'POST') { database.prepare('DELETE FROM user_mapping WHERE gitee_login=?').run(String(input.giteeLogin)); return json(response, 200, {}) }
+  if (path === '/api/notify/feishu/test' && request.method === 'POST') {
+    try { await sendFeishuTest(database); return json(response, 200, { message: '测试消息已发送,请到飞书群查看' }) }
+    catch (error) { return json(response, 500, { message: error instanceof Error ? error.message : '发送失败' }) }
+  }
+  if (path === '/api/notify/feishu/pr-merged' && request.method === 'POST') {
+    const result = await notifyPrMerged(database, { projectId: Number(input.projectId), number: Number(input.number), targets: Array.isArray(input.targets) ? input.targets.map(String) : [] })
+    return json(response, 200, result)
   }
   if (path === '/api/pr/evaluate' && request.method === 'POST') {
     try {

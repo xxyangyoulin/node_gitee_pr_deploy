@@ -4,8 +4,8 @@ interface Window {
     addProject(input: { name: string; repository: string; token: string }): Promise<{ id: number; name: string; repository: string; token: string; openPrs: number }>
     deleteProject(id: number): Promise<unknown>
     updateProject(input: { id: number; name: string; repository: string; token: string }): Promise<{ id: number; name: string; repository: string; token: string; openPrs: number }>
-    getSettings(): Promise<{ prHead: string; prBase: string; mergeMethod: string; pollIntervalSec: string; automationEnabled: string; aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string }>
-    saveSettings(input: { prHead: string; prBase: string; mergeMethod: string; pollIntervalSec?: string; automationEnabled?: string; aiBaseUrl?: string; aiApiKey?: string; aiModel?: string; aiPrompt?: string }): Promise<{ prHead: string; prBase: string; mergeMethod: string; pollIntervalSec: string; automationEnabled: string; aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string }>
+    getSettings(): Promise<{ prHead: string; prBase: string; mergeMethod: string; pollIntervalSec: string; automationEnabled: string; aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string; feishuWebhook: string }>
+    saveSettings(input: { prHead: string; prBase: string; mergeMethod: string; pollIntervalSec?: string; automationEnabled?: string; aiBaseUrl?: string; aiApiKey?: string; aiModel?: string; aiPrompt?: string; feishuWebhook?: string }): Promise<{ prHead: string; prBase: string; mergeMethod: string; pollIntervalSec: string; automationEnabled: string; aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string; feishuWebhook: string }>
     getMeta(): Promise<{ version: string; dataPath: string }>
     listDeploymentConfigs(): Promise<Array<{ id: number; projectId: number; projectName: string; name: string; host: string; username: string; remotePath: string; command: string; position: number }>>
     saveDeploymentTarget(input: { id?: number; projectId: number; name: string; host: string; username: string; remotePath: string; command: string }): Promise<unknown>
@@ -19,6 +19,11 @@ interface Window {
     refreshPulls(projectId?: number): Promise<{ results: Array<{ projectId: number; name: string; error: string }> }>
     syncStatus(): Promise<Array<{ projectId: number; name: string; lastSyncAt: string; lastError: string; enabled: number }>>
     testAiConnection(input: { aiBaseUrl: string; aiApiKey: string; aiModel: string; aiPrompt: string }): Promise<{ message: string }>
+    testFeishu(): Promise<{ message: string }>
+    listUserMappings(): Promise<Array<{ giteeLogin: string; feishuId: string; feishuName: string }>>
+    saveUserMapping(input: { giteeLogin: string; feishuId: string; feishuName: string }): Promise<unknown>
+    deleteUserMapping(giteeLogin: string): Promise<unknown>
+    notifyPrMergedFeishu(input: { projectId: number; number: number; targets: string[] }): Promise<{ sent: boolean; reason?: string }>
     evaluatePr(input: { projectId: number; number: number }): Promise<{ verdict: { needs_test: boolean; reason: string; risk_level: string } }>
     listTestConfigs(): Promise<Array<{ project_id: number; server_mode: string; host: string; username: string; workdir_template: string; source_path: string; commands: string; ai_decides: number; ai_prompt: string; timeout_sec: number; projectName: string }>>
     saveTestConfig(input: { projectId: number; serverMode: string; host: string; username: string; workdirTemplate: string; sourcePath?: string; commands: string; aiDecides: boolean; aiPrompt: string; timeoutSec: number }): Promise<unknown>

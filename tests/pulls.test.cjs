@@ -11,7 +11,7 @@ const PRS_TWO = [
   { number: 12, title: 'two fix', user: { login: 'carol' }, head: { ref: 'fix-y' }, base: { ref: 'master' }, created_at: '2026-09-27T23:59:00+08:00' },
   { number: 11, title: 'two feature', user: { login: 'bob' }, head: { ref: 'feat-x' }, base: { ref: 'main' }, created_at: '2026-09-25T08:05:00+08:00' },
 ]
-const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [], testRuns: [], refreshes: [], draftToggles: [], fileCalls: 0 }
+const saved = { approves: [], merges: [], tests: [], creates: [], runs: [], evaluates: [], testRuns: [], refreshes: [], draftToggles: [], fileCalls: 0, feishu: [] }
 const mergedNumbers = []
 let createdNumber = 13
 let merge14Failed = false
@@ -66,6 +66,8 @@ function check(name, cond) {
         }]
       }) })
     }
+    if (path === '/api/user-mappings') return route.fulfill({ json: [] })
+    if (path === '/api/notify/feishu/pr-merged') { saved.feishu.push(req.postDataJSON()); return route.fulfill({ json: { sent: true } }) }
     if (path === '/api/gitee/toggle-draft') { saved.draftToggles.push(req.postDataJSON()); return route.fulfill({ json: {} }) }
     if (path === '/api/test/configs') return route.fulfill({ json: [{ project_id: 2, server_mode: 'ssh', host: 'a.com', username: 'deploy', workdir_template: '~/TEST/{project}_{pr}', commands: '[{"label":"全量","command":"vendor/bin/phpunit tests"}]', ai_decides: 0, ai_prompt: '', timeout_sec: 600, projectName: 'proj-two' }] })
     if (path === '/api/test/run') { saved.testRuns.push(req.postDataJSON()); deployLogs.unshift({ id: deployLogs.length + 1, projectId: 2, projectName: 'proj-two', targetName: 'PR#13 测试', kind: 'test', prNumber: 13, host: 'local', output: 'running...\n[测试通过]', aiSummary: '整体通过:全部用例成功。\n• 无失败项', success: 1, createdAt: '2026-09-30 13:00:00' }); return route.fulfill({ json: 'running...\n[测试通过]' }) }
@@ -255,6 +257,7 @@ function check(name, cond) {
   check('弹窗显示部署目标(项目2 web-2)', (await page.locator('.deploy-target-info').first().textContent()).includes('web-2'))
   check('弹窗显示将执行的完整命令', (await page.locator('.deploy-target-info').nth(1).textContent()).includes('cd /srv/two && ./deploy.sh'))
   check('弹窗显示上次部署记录(重试后为最新一次)', (await page.locator('.deploy-target-info').last().textContent()).includes('2026-09-28 12:00:00'))
+  check('部署完成后发送飞书通知', saved.feishu.at(-1)?.projectId === 2 && saved.feishu.at(-1)?.number === 13 && saved.feishu.at(-1)?.targets.length >= 1)
   await page.locator('.one-click-modal button', { hasText: '关闭' }).click()
   check('关闭进度弹窗', (await page.locator('.one-click-modal').count()) === 0)
   await page.screenshot({ path: shot('pulls-oneclick.png') })

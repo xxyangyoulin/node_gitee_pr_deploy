@@ -108,7 +108,7 @@ const selectedAiVerdict = computed<{ needs_test: boolean; reason: string; risk_l
   try { return JSON.parse(raw) } catch { return null }
 })
 
-const settingsTab = ref<'general' | 'automation' | 'ai' | 'projects' | 'about'>('general')
+const settingsTab = ref<'general' | 'automation' | 'ai' | 'mapping' | 'projects' | 'about'>('general')
 const automationPanelOpen = ref(false)
 
 const automationSummary = computed(() => {
@@ -252,6 +252,45 @@ async function reevaluateSelected() {
     target.pull.ai_evaluated_at = new Date().toISOString().replace('T', ' ').slice(0, 19)
     mergeMessage.value = 'AI 评审完成'
   } catch (error) { mergeMessage.value = error instanceof Error ? error.message : '评审失败' } finally { evaluatingPr.value = false }
+}
+
+const feishuTesting = ref(false)
+const userMappings = ref<Array<{ giteeLogin: string; feishuId: string; feishuName: string }>>([])
+const mappingForm = ref({ giteeLogin: '', feishuId: '', feishuName: '' })
+const mappingError = ref('')
+const savingMapping = ref(false)
+
+async function loadUserMappings() {
+  try { const rows = await window.releaseConsole.listUserMappings(); if (Array.isArray(rows)) userMappings.value = rows } catch { }
+}
+
+async function saveUserMapping() {
+  mappingError.value = ''
+  if (!mappingForm.value.giteeLogin.trim() || !mappingForm.value.feishuId.trim()) { mappingError.value = 'Gitee 用户名与飞书 ID 必填'; return }
+  savingMapping.value = true
+  try {
+    await window.releaseConsole.saveUserMapping({ giteeLogin: mappingForm.value.giteeLogin.trim(), feishuId: mappingForm.value.feishuId.trim(), feishuName: mappingForm.value.feishuName.trim() })
+    mappingForm.value = { giteeLogin: '', feishuId: '', feishuName: '' }
+    void 0
+    mergeMessage.value = '用户映射已保存'
+    await loadUserMappings()
+  } catch (error) { mappingError.value = error instanceof Error ? error.message : '保存失败' } finally { savingMapping.value = false }
+}
+
+async function removeUserMapping(giteeLogin: string) {
+  await window.releaseConsole.deleteUserMapping(giteeLogin)
+  await loadUserMappings()
+}
+const feishuTestMessage = ref('')
+
+async function testFeishuSend() {
+  feishuTesting.value = true
+  feishuTestMessage.value = ''
+  try {
+    await saveAppSettings()
+    const { message } = await window.releaseConsole.testFeishu()
+    feishuTestMessage.value = message
+  } catch (error) { feishuTestMessage.value = error instanceof Error ? error.message : '发送失败' } finally { feishuTesting.value = false }
 }
 
 async function testAi() {
@@ -402,7 +441,7 @@ const isDockToMaster = computed(() => {
 const showOneClickDeploy = computed(() => !!oneClickTarget.value || isDockToMaster.value)
 const selectedEnded = computed(() => !!selectedPull.value && isEndedPull(selectedPull.value))
 
-const settings = ref({ prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0', aiBaseUrl: '', aiApiKey: '', aiModel: '', aiPrompt: '' })
+const settings = ref({ prHead: 'dock', prBase: 'master', mergeMethod: 'merge', pollIntervalSec: '180', automationEnabled: '0', aiBaseUrl: '', aiApiKey: '', aiModel: '', aiPrompt: '', feishuWebhook: '' })
 const meta = ref({ version: '', dataPath: '' })
 
 const showCreatePr = ref(false)
@@ -699,6 +738,7 @@ onMounted(async () => {
   if (activePage.value === 'pulls') loadPulls()
   if (activePage.value === 'deployments') loadDeploymentRows()
   if (activePage.value === 'logs') loadRequestLogs()
+  if (activePage.value === 'settings') loadUserMappings()
 })
 
 async function removeProject(project: Project) {
@@ -1214,7 +1254,12 @@ async function runOneClick() {
       run.deployed = true
     }
     mergeMessage.value = run.withDeploy ? '一键部署完成' : '一键合并完成'
-    if (run.withDeploy) notifyDesktop('一键部署完成', `${run.project.name} 全流程成功`)
+    if (run.withDeploy) {
+      notifyDesktop('一键部署完成', `${run.project.name} 全流程成功`)
+      // 飞书通知 PR 提交人(后台执行,不阻塞)
+      const notifyTargets = run.deployedTargetIds.map((id) => { const row = deploymentRows.value.find((item) => item.id === id); return row ? `${row.name || row.host}(${row.username}@${row.host})` : '' }).filter(Boolean)
+      void window.releaseConsole.notifyPrMergedFeishu({ projectId: run.project.id, number: Number(run.pull.number), targets: notifyTargets }).catch(() => { })
+    }
     run.running = false // 先解除弹窗锁定,同步在后台进行
     void syncProjectPulls(run.project.id)
     return
@@ -1422,6 +1467,7 @@ async function toggleFullFile(file: any) {
 
 watch(activePage, (page) => {
   if (page === 'pulls') loadPulls()
+  if (page === 'settings') loadUserMappings()
   if (page === 'deployments') loadDeploymentRows()
   if (page === 'logs') loadRequestLogs()
 })
@@ -1587,6 +1633,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
             <button :class="{ active: settingsTab === 'general' }" @click="settingsTab = 'general'">通用</button>
             <button :class="{ active: settingsTab === 'automation' }" @click="settingsTab = 'automation'">自动化</button>
             <button :class="{ active: settingsTab === 'ai' }" @click="settingsTab = 'ai'">AI 模型</button>
+            <button :class="{ active: settingsTab === 'mapping' }" @click="settingsTab = 'mapping'">用户映射</button>
             <button :class="{ active: settingsTab === 'projects' }" @click="settingsTab = 'projects'">项目管理</button>
             <button :class="{ active: settingsTab === 'about' }" @click="settingsTab = 'about'">关于</button>
           </div>
@@ -1600,6 +1647,8 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           <form v-else-if="settingsTab === 'automation'" class="settings-section" @submit.prevent="saveAppSettings">
             <h2>自动化</h2>
             <label>全局自动化<DropdownSelect v-model="settings.automationEnabled" :options="[{ value: '0', label: '关闭' }, { value: '1', label: '开启' }]" /></label>
+            <label>飞书通知 Webhook(一键部署完成后通知 PR 提交人)<input v-model="settings.feishuWebhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." /></label>
+            <div class="ai-test-row"><button type="button" :disabled="feishuTesting" @click="testFeishuSend">{{ feishuTesting ? '发送中…' : '发送测试消息' }}</button><span v-if="feishuTestMessage" :class="feishuTestMessage.includes('已发送') ? 'stat-added' : 'stat-removed'">{{ feishuTestMessage }}</span></div>
             <label>轮询间隔(秒,最小 60)<input v-model="settings.pollIntervalSec" type="number" min="60" step="10" /></label>
             <div class="sync-project-list">
               <div v-for="row in syncStatusRows" :key="row.projectId" class="project-row">
@@ -1630,6 +1679,22 @@ PR 描述:{{body}}
             <div class="ai-test-row"><button type="button" :disabled="aiTesting" @click="testAi">{{ aiTesting ? '测试中…' : '测试连接' }}</button><span v-if="aiTestMessage" :class="aiTestMessage.startsWith('连接成功') ? 'stat-added' : 'stat-removed'">{{ aiTestMessage }}</span></div>
             <button class="primary" type="submit">保存设置</button>
           </form>
+          <div v-else-if="settingsTab === 'mapping'" class="settings-section">
+            <h2>Gitee ↔ 飞书 用户映射</h2>
+            <p class="mapping-hint">通知卡片将按 Gitee 提交人 @ 对应飞书用户。飞书 ID 填 open_id(ou_ 开头)或 user_id;显示名用于未匹配时的回退文案。</p>
+            <form class="mapping-form" @submit.prevent="saveUserMapping">
+              <input v-model="mappingForm.giteeLogin" placeholder="Gitee 用户名" />
+              <input v-model="mappingForm.feishuId" placeholder="飞书 open_id(ou_xxx)" />
+              <input v-model="mappingForm.feishuName" placeholder="飞书显示名(可选)" />
+              <button class="primary" type="submit" :disabled="savingMapping">{{ savingMapping ? '保存中…' : '添加/更新' }}</button>
+            </form>
+            <div v-if="mappingError" class="error-message">{{ mappingError }}</div>
+            <div v-if="!userMappings.length" class="settings-empty">暂无映射,未匹配的通知将显示 Gitee 用户名纯文本。</div>
+            <div v-for="mapping in userMappings" :key="mapping.giteeLogin" class="project-row">
+              <div class="project-row-info"><strong>{{ mapping.giteeLogin }}</strong><span>→ 飞书 {{ mapping.feishuName || mapping.feishuId.slice(0, 14) }}</span></div>
+              <div class="row-actions"><button @click="mappingForm = { giteeLogin: mapping.giteeLogin, feishuId: mapping.feishuId, feishuName: mapping.feishuName }; settingsTab = 'mapping'">编辑</button><button class="danger" @click="removeUserMapping(mapping.giteeLogin)">删除</button></div>
+            </div>
+          </div>
           <div v-else-if="settingsTab === 'projects'" class="settings-section">
             <h2>项目管理</h2>
             <div v-if="!projects.length" class="settings-empty">暂无项目，请先在项目页添加。</div>
