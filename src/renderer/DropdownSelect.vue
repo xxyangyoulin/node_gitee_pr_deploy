@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
-export type DropdownOption = { value: string | number; label: string; actionLabel?: string; onAction?: () => void }
+export type DropdownAction = { label: string; onAction: () => void }
+export type DropdownOption = { value: string | number; label: string; actionLabel?: string; onAction?: () => void; actions?: DropdownAction[] }
 
 const props = defineProps<{
   modelValue: string | number
@@ -31,9 +32,15 @@ function choose(value: string | number) {
   open.value = false
 }
 
-function runAction(option: DropdownOption) {
+function runAction(action: DropdownAction) {
   open.value = false
-  option.onAction?.()
+  action.onAction()
+}
+
+function optionActions(option: DropdownOption): DropdownAction[] {
+  const list = [...(option.actions ?? [])]
+  if (option.actionLabel && option.onAction) list.push({ label: option.actionLabel, onAction: option.onAction })
+  return list
 }
 
 watch(open, (value) => {
@@ -62,7 +69,7 @@ onBeforeUnmount(() => {
       <span class="dropdown-arrow">▾</span>
     </button>
     <div v-if="open" class="dropdown-menu">
-      <div v-for="option in options" :key="option.value" :class="['dropdown-option', { active: option.value === modelValue }]"><button type="button" class="dropdown-option-label" @click="choose(option.value)">{{ option.label }}</button><button v-if="option.actionLabel && option.onAction" type="button" class="dropdown-option-action" @click.stop="runAction(option)">{{ option.actionLabel }}</button></div>
+      <div v-for="option in options" :key="option.value" :class="['dropdown-option', { active: option.value === modelValue }]"><button type="button" class="dropdown-option-label" @click="choose(option.value)">{{ option.label }}</button><button v-for="(action, i) in optionActions(option)" :key="i" type="button" class="dropdown-option-action" @click.stop="runAction(action)">{{ action.label }}</button></div>
     </div>
   </span>
 </template>

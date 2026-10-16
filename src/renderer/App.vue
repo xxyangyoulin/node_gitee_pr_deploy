@@ -907,6 +907,10 @@ async function runTargetDeployment(row: DeploymentRow) {
   if (deployLog.value.output.includes('[部署完成]')) notifyDesktop('部署完成', `${row.projectName} · ${row.name || row.host}`)
 }
 
+async function openProjectHome(project: Project) {
+  window.open(`https://gitee.com/${project.repository}`, '_blank', 'noopener')
+}
+
 async function deployProjectDirect(project: Project) {
   if (deployLog.value.running) { mergeMessage.value = '已有部署在执行,请稍后'; return }
   if (!deploymentRows.value.length) await loadDeploymentRows()
@@ -1510,7 +1514,7 @@ watch([errorMessage, mergeMessage], ([error, success]) => {
           <div class="page-heading">
             <div><h1>PR</h1><p v-if="selectedPull" class="selected-pr-line">已选<span class="project-badge selected-project-badge" :title="selectedPull.project.repository">{{ selectedPull.project.name }}</span><strong class="selected-pr-ref">#{{ selectedPull.pull.number }} · {{ selectedPull.pull.title }}</strong></p><p v-else>汇总所有项目的开放 PR，点击左侧 PR 查看变更与操作。</p></div>
             <div class="heading-actions">
-              <DropdownSelect v-model="pullFilter" class="filter-select" :options="[{ value: 'all', label: '全部项目' }, ...projects.map((project) => ({ value: project.id, label: project.name, actionLabel: '部署', onAction: () => deployProjectDirect(project) }))]" />
+              <DropdownSelect v-model="pullFilter" class="filter-select" :options="[{ value: 'all', label: '全部项目' }, ...projects.map((project) => ({ value: project.id, label: project.name, actions: [{ label: '主页', onAction: () => openProjectHome(project) }, { label: '部署', onAction: () => deployProjectDirect(project) }] }))]" />
               <button class="merge-action" :class="{ ready: reviewPassed && testPassed, confirming: mergeConfirming }" :disabled="!selectedPull || selectedEnded" @click="requestMerge">{{ mergeConfirming ? '再次点击确认合并' : reviewPassed && testPassed ? '合并 PR' : '一键合并' }}</button><button v-if="oneClickTarget" class="one-click primary" :class="{ confirming: oneClickAction === 'master' }" :disabled="!!oneClickRun?.running || selectedEnded" @click="requestOneClick('master')">{{ oneClickAction === 'master' ? '再次点击确认' : `一键 ${settings.prBase}` }}</button><button v-if="showOneClickDeploy" class="one-click" :class="{ confirming: oneClickAction === 'deploy' }" :disabled="!!oneClickRun?.running || selectedEnded" @click="requestOneClick('deploy')">{{ oneClickAction === 'deploy' ? '再次点击确认' : '一键部署' }}</button><button :disabled="!projects.length" @click="openCreatePr">创建 PR</button><button :disabled="loadingPulls" @click="refreshPulls">{{ loadingPulls ? '刷新中…' : '刷新' }}</button>
             </div>
           </div>

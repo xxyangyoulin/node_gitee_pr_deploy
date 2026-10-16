@@ -348,8 +348,9 @@ function check(name, cond) {
   // 项目下拉内直发部署
   const runsBefore = saved.runs.length
   await page.locator('.filter-select .dropdown-toggle').click()
-  const deployAction = page.locator('.dropdown-option', { hasText: 'proj-one' }).locator('.dropdown-option-action')
-  check('下拉项目行含部署按钮', (await deployAction.count()) === 1)
+  const projOption = page.locator('.dropdown-option', { hasText: 'proj-one' })
+  check('下拉项目行含主页与部署按钮', (await projOption.locator('.dropdown-option-action', { hasText: '主页' }).count()) === 1 && (await projOption.locator('.dropdown-option-action', { hasText: '部署' }).count()) === 1)
+  const deployAction = projOption.locator('.dropdown-option-action', { hasText: '部署' })
   await deployAction.click()
   await page.waitForTimeout(600)
   check('点击后跳转部署页', new URL(page.url()).hash === '#/deployments')
